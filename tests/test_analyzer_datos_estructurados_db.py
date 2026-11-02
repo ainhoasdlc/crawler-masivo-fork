@@ -23,7 +23,8 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from analysis.analyzer import SEOAnalyzer
-from shared.models import Base, Issue, Job, StructuredData, Url
+from shared.comparacion import _tipos_e_idiomas_de_censo
+from shared.models import Base, Hreflang, Issue, Job, StructuredData, Url
 
 
 @compiles(BigInteger, "sqlite")
@@ -171,3 +172,45 @@ def test_un_faq_dentro_de_un_bloque_con_warning_sigue_dando_su_aviso_info():
                por_tipo["structured_data_info"].details["validation_issues"])
     con_faq = s.query(StructuredData).join(Url).filter(Url.url == "https://x.com/p0").one()
     assert con_faq.validation_status == "warning", "el bloque guarda el peor nivel"
+
+
+def _montar_con_hreflang():
+    """Como `_montar`, pero con la tabla Hreflang: `_tipos_e_idiomas_de_censo`
+    la consulta (el censo trae tipos e idiomas de una vez)."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        Job.__table__, Url.__table__, StructuredData.__table__,
+        Hreflang.__table__])
+    s = sessionmaker(bind=engine)()
+    j = Job(id=uuid.uuid4(), name="t", status="completed",
+            seeds=["https://x.com/"], config={})
+    s.add(j)
+    s.flush()
+    return s, j
+
+
+def test_un_type_doble_cuenta_como_dos_tipos_sueltos():
+    """Un `@type` lista se guarda unido (`"Organization, LocalBusiness"`) pero
+    el censo lo parte en tipos sueltos.
+
+    Caso real de Workoholics: una pagina pasa de `Organization` sola a
+    `["Organization", "LocalBusiness"]`. Comparado como atomo, la regla
+    `pierden_datos_estructurados` avisaba de que pierde Organization y en la
+    columna «ahora» lo enseñaba presente: un aviso que se contradice. Partido,
+    `{Organization}` vs `{Organization, LocalBusiness}` no pierde nada.
+    """
+    s, j = _montar_con_hreflang()
+    u = Url(job_id=j.id, url="https://x.com/", url_hash="h",
+            is_internal=True, is_html=True, status_code=200)
+    s.add(u)
+    s.flush()
+    # Lo que guarda extractors._tipo_normalizado para un @type lista.
+    s.add(StructuredData(url_id=u.id, raw={}, format="jsonld",
+                         schema_type="Organization, LocalBusiness"))
+    s.add(StructuredData(url_id=u.id, raw={}, format="jsonld",
+                         schema_type="BreadcrumbList"))
+    s.flush()
+
+    tipos, _ = _tipos_e_idiomas_de_censo(s, j.id)
+    assert tipos[u.id] == ["BreadcrumbList", "LocalBusiness", "Organization"], \
+        "el atomo unido se parte en tipos sueltos, comparables uno a uno"

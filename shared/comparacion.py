@@ -1742,6 +1742,13 @@ def _tipos_e_idiomas_de_censo(db, job_id) -> tuple[dict[int, list], dict[int, li
     que solo es una referencia, decision 51) no cuentan, ni los de un JSON-LD
     que Google descarta por no ser JSON estricto (80), y el hreflang del
     `<body>` tampoco, porque Google no lo lee (decision 56).
+
+    Un `@type` lista (`["Organization", "LocalBusiness"]`) se guarda como un
+    solo `schema_type` unido con ", " (extractors._tipo_normalizado), asi que
+    aqui se parte en tipos sueltos: comparado como atomo, una pagina que pasa
+    de `Organization` a `["Organization", "LocalBusiness"]` «perderia»
+    Organization aunque siga ahi, y cambiar el orden del array «perderia» los
+    dos. Un nombre de schema.org no lleva coma, asi que partir es seguro.
     """
     from sqlalchemy import or_
 
@@ -1756,7 +1763,10 @@ def _tipos_e_idiomas_de_censo(db, job_id) -> tuple[dict[int, list], dict[int, li
                          .filter(Url.job_id == job_id, StructuredData.schema_type.isnot(None),
                                  StructuredData.json_invalido.is_(None))
                          .distinct()):
-        tipos[url_id].add(tipo)
+        for suelto in tipo.split(","):
+            suelto = suelto.strip()
+            if suelto:
+                tipos[url_id].add(suelto)
     idiomas: dict[int, set] = defaultdict(set)
     for url_id, lang in (db.query(Hreflang.url_id, Hreflang.lang)
                          .join(Url, Url.id == Hreflang.url_id)
