@@ -29,7 +29,8 @@ GUARDADAS = 3
 def _resumen(imp: BacklinkImport, en_uso: bool) -> dict:
     return {"id": imp.id, "fuente": imp.fuente, "fichero": imp.fichero,
             "fecha_dato": imp.fecha_dato.isoformat() if imp.fecha_dato else None,
-            "filas": imp.filas, "spam": imp.spam, "descartadas": imp.descartadas or {},
+            "filas": imp.filas, "spam": imp.spam, "nofollow": imp.nofollow,
+            "descartadas": imp.descartadas or {},
             "columnas": imp.columnas or {},
             "cortado": bool(imp.cortado), "subido": imp.created_at.isoformat() if imp.created_at else None,
             "en_uso": en_uso}
@@ -55,7 +56,7 @@ def subir(cliente_id: uuid.UUID, fichero: UploadFile = File(...),
           fuente: str | None = Form(None), fecha_dato: date | None = Form(None),
           db: Session = Depends(get_session)):
     """Lee un export de Ahrefs, Semrush o Majestic (o uno con «Source URL» y
-    «Target URL») y guarda sus backlinks dofollow y vivos.
+    «Target URL») y guarda sus backlinks vivos, los nofollow marcados.
 
     Sincrona a proposito: FastAPI la corre en un hilo, y leer 200.000 filas e
     insertarlas no para el bucle de eventos (la interfaz, el MCP). El fichero
@@ -72,13 +73,12 @@ def subir(cliente_id: uuid.UUID, fichero: UploadFile = File(...),
     except B.CsvNoValido as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not lectura.filas:
-        raise HTTPException(status_code=422, detail="El fichero no tiene ningún backlink dofollow y vivo")
+        raise HTTPException(status_code=422, detail="El fichero no tiene ningún backlink vivo")
     imp = BacklinkImport(cliente_id=cliente_id, fuente=lectura.fuente, fichero=(fichero.filename or "")[:255],
                          fecha_dato=fecha_dato, filas=len(lectura.filas), cortado=lectura.cortado,
                          spam=lectura.spam if "spam" in lectura.columnas else None,
-                         columnas=lectura.columnas,
-                         descartadas={"nofollow": lectura.descartadas_nofollow,
-                                      "perdidas": lectura.descartadas_perdidas,
+                         nofollow=lectura.nofollow, columnas=lectura.columnas,
+                         descartadas={"perdidas": lectura.descartadas_perdidas,
                                       "sin_url": lectura.descartadas_sin_url})
     db.add(imp)
     db.flush()

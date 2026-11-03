@@ -1232,7 +1232,9 @@ class UrlResponse(BaseModel):
     # Con los backlinks del cliente (decision 212); NULL sin CSV subido.
     pagerank_externo_score: int | None = None
     backlinks_externos: int | None = None
+    backlinks_nofollow: int | None = None
     backlinks_spam: int | None = None
+    backlinks_spam_pct: float | None = None
     autoridad_externa: float | None = None
     # Logs del servidor (decision 213); NULL sin logs subidos.
     googlebot_visitas: int | None = None

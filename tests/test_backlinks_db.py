@@ -124,9 +124,11 @@ def test_el_spam_se_cuenta_no_aporta_y_no_avisa(sesion, con_backlinks):
     ext = sesion.get(Job, j.id).pagerank_resumen["externo"]
     assert (ext["backlinks"], ext["spam"], ext["spam_casados"]) == (8, 2, 2)
     assert ext["entra_en"]["error"] == pytest.approx(8 / 16, abs=1e-3), "los 50 del spam no cuentan"
-    roto = sesion.execute(select(Url.backlinks_externos, Url.backlinks_spam, Url.autoridad_externa)
-                          .where(Url.id == filas["/roto"].id)).one()
-    assert tuple(roto) == (2, 1, 8.0)
+    roto = sesion.execute(select(Url.backlinks_externos, Url.backlinks_spam, Url.backlinks_spam_pct,
+                                 Url.autoridad_externa).where(Url.id == filas["/roto"].id)).one()
+    assert tuple(roto) == (2, 1, 50.0, 8.0)
+    sin = sesion.execute(select(Url.backlinks_spam_pct).where(Url.job_id == j.id, Url.backlinks_externos == 0)).scalars().all()
+    assert sin and set(sin) == {None}, "sin backlinks no es un 0 % de spam"
     tipos = {(t, u) for t, u in sesion.execute(
         select(Issue.issue_type, Issue.url_id).where(Issue.job_id == j.id, Issue.issue_type == "backlinks_a_error"))}
     assert ("backlinks_a_error", filas["/roto"].id) in tipos
@@ -176,3 +178,33 @@ def test_sin_importacion_las_columnas_quedan_a_null(sesion, con_backlinks):
     sesion.expire_all()
     assert sesion.get(Url, filas["/roto"].id).backlinks_externos is None
     assert "externo" not in (sesion.get(Job, j.id).pagerank_resumen or {})
+
+
+def test_un_404_con_solo_nofollow_se_avisa_y_no_aporta(sesion, con_backlinks):
+    """Un nofollow no trae autoridad, pero si visitas: el 404 que solo lo
+    recibe se avisa (inventario de una migracion), y sale en su columna."""
+    from analysis import avisos_de_backlinks
+    from analysis.analyzer import SEOAnalyzer
+
+    j, filas, c = con_backlinks
+    nf = Url(job_id=j.id, url=BASE + "/nf-404", url_hash="nf-404", is_internal=True, status_code=404,
+             is_html=True, indexable=False, indexability_status="4xx Client Error", crawl_depth=2)
+    sesion.add(nf)
+    imp = sesion.query(BacklinkImport).filter(BacklinkImport.cliente_id == c.id).one()
+    sesion.add(ExternalLink(import_id=imp.id, url_to=BASE + "/nf-404", url_from="https://foro.com/hilo",
+                            dominio_from="foro.com", aportacion=50.0, nofollow=True))
+    sesion.commit()
+    an = SEOAnalyzer(sesion, str(j.id))
+    an.compute_pagerank()
+    avisos_de_backlinks.avisar(an)
+    an._flush_issues()
+    sesion.commit()
+    ext = sesion.get(Job, j.id).pagerank_resumen["externo"]
+    assert (ext["backlinks"], ext["nofollow"], ext["nofollow_casados"]) == (7, 1, 1)
+    assert ext["entra_en"]["error"] == pytest.approx(8 / 16, abs=1e-3), "los 50 del nofollow no cuentan"
+    fila = sesion.execute(select(Url.backlinks_externos, Url.backlinks_nofollow, Url.backlinks_spam_pct,
+                                 Url.autoridad_externa).where(Url.id == nf.id)).one()
+    assert tuple(fila) == (0, 1, 0.0, 0.0)
+    (det,) = sesion.execute(select(Issue.details).where(Issue.job_id == j.id, Issue.url_id == nf.id,
+                                                         Issue.issue_type == "backlinks_a_error")).one()
+    assert (det["backlinks"], det["nofollow"]) == (1, 1)

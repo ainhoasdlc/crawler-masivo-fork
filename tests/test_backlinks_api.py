@@ -62,22 +62,22 @@ def test_subir_un_export_de_ahrefs(entorno):
     r = _subir(api, cid, AHREFS.encode("utf-16"), fecha_dato="2026-10-20")
     assert r.status_code == 201, r.text
     j = r.json()
-    assert (j["fuente"], j["filas"], j["leidas"], j["en_uso"]) == ("ahrefs", 2, 6, True)
-    assert j["descartadas"] == {"nofollow": 3, "perdidas": 1, "sin_url": 0}
-    assert j["fecha_dato"] == "2026-10-20" and j["dominios"] == 2
+    assert (j["fuente"], j["filas"], j["leidas"], j["en_uso"], j["nofollow"]) == ("ahrefs", 5, 6, True, 3)
+    assert j["descartadas"] == {"perdidas": 1, "sin_url": 0}
+    assert j["fecha_dato"] == "2026-10-20" and j["dominios"] == 5
     with S() as s:
-        assert s.query(ExternalLink).count() == 2
+        assert sorted(x.nofollow for x in s.query(ExternalLink)) == [False, False, True, True, True]
 
 
 def test_el_spam_se_cuenta_en_la_importacion(entorno):
     api, S, cid = entorno
     j = _subir(api, cid, AHREFS_SPAM.encode("utf-16")).json()
-    assert (j["filas"], j["spam"]) == (3, 2)
+    assert (j["filas"], j["spam"]) == (4, 3)
     with S() as s:
-        assert sorted(x.spam for x in s.query(ExternalLink)) == [False, True, True]
+        assert sorted(x.spam for x in s.query(ExternalLink)) == [False, True, True, True]
     # Sin la columna, NULL: no se afirma que no haya spam.
     assert _subir(api, cid, AHREFS.encode("utf-16")).json()["spam"] is None
-    assert [i["spam"] for i in api.get(f"/api/clients/{cid}/backlinks").json()] == [None, 2]
+    assert [i["spam"] for i in api.get(f"/api/clients/{cid}/backlinks").json()] == [None, 3]
 
 
 def test_se_guardan_las_tres_ultimas_y_la_primera_es_la_que_se_usa(entorno):
@@ -87,15 +87,15 @@ def test_se_guardan_las_tres_ultimas_y_la_primera_es_la_que_se_usa(entorno):
     assert [i["id"] for i in lista] == ids[:0:-1] and [i["en_uso"] for i in lista] == [True, False, False]
     with S() as s:
         assert s.query(BacklinkImport).count() == 3
-        assert s.query(ExternalLink).count() == 3, "las filas de la cuarta se fueron con ella"
+        assert s.query(ExternalLink).count() == 6, "las filas de la cuarta se fueron con ella"
 
 
 def test_lo_que_no_se_puede_leer(entorno):
     api, _, cid = entorno
     assert _subir(api, cid, b"url,clics\nhttps://x.com/,1\n").status_code == 422
-    solo_nofollow = SEMRUSH.split("\n")[0] + "\n" + SEMRUSH.split("\n")[2] + "\n"
-    r = _subir(api, cid, solo_nofollow.encode())
-    assert r.status_code == 422 and "dofollow" in r.json()["detail"]
+    solo_perdidos = SEMRUSH.split("\n")[0] + "\n" + SEMRUSH.split("\n")[2][:-len("false")] + "true\n"
+    r = _subir(api, cid, solo_perdidos.encode())
+    assert r.status_code == 422 and "vivo" in r.json()["detail"]
     assert _subir(api, uuid.uuid4(), SEMRUSH.encode()).status_code == 404
 
 

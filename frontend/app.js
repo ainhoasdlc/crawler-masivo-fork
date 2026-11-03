@@ -7229,8 +7229,10 @@ const EXP_COLUMN_DEFS = {
   // Con los backlinks del cliente (decision 212): vacias sin CSV subido.
   pagerank_externo_score: { label: 'PageRank desde fuera', type: 'numeric', sortable: true, filterKey: 'pagerank_externo_score', width: 170, fmt: r => r.pagerank_externo_score != null ? String(r.pagerank_externo_score) : '' },
   googlebot_visitas:    { label: 'Visitas Googlebot', type: 'numeric', sortable: true,  filterKey: 'googlebot_visitas',       width: 150, fmt: r => r.googlebot_visitas != null ? fmt.num(r.googlebot_visitas) : '' },
-  backlinks_externos:   { label: 'Backlinks',         type: 'numeric', sortable: true,  filterKey: 'backlinks_externos',      width: 110, fmt: r => r.backlinks_externos != null ? fmt.num(r.backlinks_externos) : '' },
+  backlinks_externos:   { label: 'Backlinks dofollow',         type: 'numeric', sortable: true,  filterKey: 'backlinks_externos',      width: 110, fmt: r => r.backlinks_externos != null ? fmt.num(r.backlinks_externos) : '' },
   backlinks_spam:       { label: 'Backlinks spam',    type: 'numeric', sortable: true,  filterKey: 'backlinks_spam',          width: 130, fmt: r => r.backlinks_spam != null ? fmt.num(r.backlinks_spam) : '' },
+  backlinks_nofollow:   { label: 'Backlinks nofollow', type: 'numeric', sortable: true,  filterKey: 'backlinks_nofollow',      width: 140, fmt: r => r.backlinks_nofollow != null ? fmt.num(r.backlinks_nofollow) : '' },
+  backlinks_spam_pct:   { label: '% backlinks spam',  type: 'numeric', sortable: true,  filterKey: 'backlinks_spam_pct',      width: 140, fmt: r => r.backlinks_spam_pct != null ? fmt.pct(r.backlinks_spam_pct) : '' },
   pagerank_raw:         { label: 'PageRank (x media)', grupo: 'otros', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? fmt.dec(r.pagerank_raw * 1e4, 2) : '' },
   pagerank:             { label: 'PageRank (0-10, antiguo)', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? fmt.dec(r.pagerank, 4) : '' },
   near_duplicate_count: { label: 'Casi duplicadas', type: 'numeric', sortable: true,  filterKey: 'near_duplicate_count',    width: 150, fmt: r => r.near_duplicate_count ?? '' },
@@ -7296,7 +7298,7 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap','rel_next','rel_prev']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
-  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','pagerank_externo_score','backlinks_externos','backlinks_spam','googlebot_visitas','click_depth','crawl_depth','folder_depth','url_length']],
+  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','pagerank_externo_score','backlinks_externos','backlinks_nofollow','backlinks_spam','backlinks_spam_pct','googlebot_visitas','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
   ['Móvil e idioma', ['viewport','html_lang']],
   ['Search Console (90 días)', ['gsc_clics','gsc_impresiones','gsc_posicion']],
@@ -7462,7 +7464,7 @@ const EXP_TABS = [
     columns: ['url','status_code','googlebot_visitas','pagerank_score','inlinks_count','indexable'] },
   // Backlinks del CSV del cliente (decision 212).
   { key: 'a_backlinks', label: 'Backlinks', icon: 'external-link', filter: { is_internal: true }, ambito: ['backlinks_a_error','backlinks_a_noindex','backlinks_a_bloqueada_robots'],
-    columns: ['url','status_code','backlinks_externos','backlinks_spam','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
+    columns: ['url','status_code','backlinks_externos','backlinks_nofollow','backlinks_spam','backlinks_spam_pct','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],
     columns: ['url','status_code','rel_next','rel_prev','canonical_href','indexable','inlinks_count'] },
@@ -7890,6 +7892,8 @@ function bloqueBacklinks(job) {
   frases.push(fmt.num(e.casados) + ' de ' + fmt.num(e.backlinks) + ' backlinks (' + pct(e.parte_casada) + ') llegan a ' + fmt.num(e.paginas_con_backlinks)
     + (e.paginas_con_backlinks === 1 ? ' página de este rastreo.' : ' páginas de este rastreo.'));
   // Lo que el proveedor marca como spam (Ahrefs, «Is spam»): se cuenta, no aporta.
+  // Los nofollow (tambien ugc y sponsored): se guardan para el inventario, no aportan.
+  if (e.nofollow > 0) frases.push(fmt.num(e.nofollow) + ' de ' + fmt.num(e.backlinks) + ' (' + pct(e.nofollow / e.backlinks) + ') son nofollow: no suman autoridad, pero traen visitas y cuentan en los avisos (una página con ellos no puede quedarse en un 404).');
   if (e.spam > 0) frases.push(fmt.num(e.spam) + ' de ' + fmt.num(e.backlinks) + ' (' + pct(e.spam / e.backlinks) + ') están marcados como spam por '
     + (FUENTE_BACKLINKS[e.fuente] || e.fuente) + ': se cuentan, pero no suman autoridad en el PageRank desde fuera.');
   const perdida = (entra.error || 0) + (entra.sin_respuesta || 0);

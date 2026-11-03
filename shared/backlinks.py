@@ -6,7 +6,12 @@ con la autoridad que entra de fuera y los avisos de lo que se pierde).
 - **De un CSV exportado, sin API de pago.** Ahrefs, Semrush y Majestic cada
   uno con sus columnas: se reconocen por nombre, sin mayusculas ni espacios,
   y el separador y la codificacion (Ahrefs exporta UTF-16 con tabuladores) se
-  detectan. Lo que no es dofollow o esta perdido no se guarda.
+  detectan. Lo que esta perdido no se guarda.
+- **Los nofollow se guardan marcados, pero no aportan.** nofollow, ugc y
+  sponsored (`external_links.nofollow`) no pasan autoridad, pero una pagina
+  con enlaces de otros sitios hay que inventariarla igual (una migracion no
+  puede dejarla en un 404: llegan visitas por ellos). Cuentan en los
+  backlinks de la pagina y en sus avisos, no en el PageRank desde fuera.
 - **El spam que marca el proveedor se guarda, pero no aporta.** Ahrefs exporta
   «Is spam» por backlink: se guarda (`external_links.spam`) y se cuenta, para
   decir cuanto de lo que llega es spam, pero no suma autoridad. Una red de
@@ -140,16 +145,17 @@ class Lectura:
     fuente: str
     filas: list[dict[str, Any]] = field(default_factory=list)
     leidas: int = 0
-    descartadas_nofollow: int = 0
+    descartadas_nofollow: int = 0  # ya no se descartan; queda por las importaciones viejas
     descartadas_perdidas: int = 0
     descartadas_sin_url: int = 0
     spam: int = 0
+    nofollow: int = 0
     cortado: bool = False
     columnas: dict[str, str] = field(default_factory=dict)
 
 
 def leer_csv(origen, *, fuente: str | None = None, max_filas: int = MAX_FILAS) -> Lectura:
-    """Las filas dofollow y vivas de un export, con su aportacion. `origen` es
+    """Las filas vivas de un export, con su aportacion y si son nofollow. `origen` es
     un fichero binario (se lee en streaming: un export de Ahrefs en UTF-16 con
     el contexto de cada enlace son 1-2 KB por fila) o unos bytes.
 
@@ -203,9 +209,7 @@ def _leer(f, fuente, max_filas) -> Lectura:
         nofollow = (_verdad(celda(fila, "nofollow")) or _verdad(celda(fila, "ugc"))
                     or _verdad(celda(fila, "sponsored")))
         tipo = (celda(fila, "tipo") or "").lower()
-        if nofollow or "nofollow" in tipo or "ugc" in tipo or "sponsored" in tipo:
-            lec.descartadas_nofollow += 1
-            continue
+        nofollow = bool(nofollow or "nofollow" in tipo or "ugc" in tipo or "sponsored" in tipo)
         perdido = (celda(fila, "perdido") or "").strip().lower()
         if perdido and perdido not in ("0", "false", "no", "-", "live", "active", "not lost"):
             lec.descartadas_perdidas += 1
@@ -219,9 +223,10 @@ def _leer(f, fuente, max_filas) -> Lectura:
             (externos if externos is not None and externos >= 0 else 0.0) + 1.0)
         spam = _verdad(celda(fila, "spam")) if "spam" in indice else None
         lec.spam += bool(spam)
+        lec.nofollow += nofollow
         lec.filas.append({"url_from": origen[:2000], "url_to": destino[:2000],
                           "dominio_from": (urlsplit(origen).hostname or "")[:255],
-                          "aportacion": round(aporte, 6), "spam": spam})
+                          "aportacion": round(aporte, 6), "spam": spam, "nofollow": nofollow})
     return lec
 
 
@@ -259,6 +264,9 @@ class Cruce:
     # Los marcados como spam por el proveedor: cuentan como backlinks, no aportan.
     spam: int = 0
     spam_casados: int = 0
+    # Los nofollow (tambien ugc y sponsored): igual, cuentan y no aportan.
+    nofollow: int = 0
+    nofollow_casados: int = 0
 
     @property
     def parte_casada(self) -> float | None:
@@ -329,37 +337,43 @@ def indice_de_censo(urls: Iterable[tuple]) -> IndiceCenso:
 
 def cruzar(filas: Iterable[tuple], urls: Iterable[tuple],
            *, max_no_rastreadas: int = 50, max_origenes: int = 5) -> Cruce:
-    """`filas`: (url_to, url_from, dominio_from, aportacion[, spam]). `urls`:
-    (id, url) o (id, url, rango) de las internas del censo (`indice_de_censo`).
-    Un backlink spam cuenta en `backlinks` y en `spam`, no en la aportacion
-    ni entre los origenes que se ensenan."""
+    """`filas`: (url_to, url_from, dominio_from, aportacion[, spam[, nofollow]]).
+    `urls`: (id, url) o (id, url, rango) de las internas del censo
+    (`indice_de_censo`). `backlinks` los cuenta todos; un spam o un nofollow
+    cuenta ademas en el suyo y no aporta. Entre los origenes que se ensenan,
+    los nofollow si (al final: aportan 0) y el spam no."""
     indice = urls if isinstance(urls, IndiceCenso) else indice_de_censo(urls)
     por_url: dict[int, dict[str, Any]] = {}
     fuera: dict[str, dict[str, Any]] = {}
-    n = casadas = spam_total = spam_casados = 0
+    n = casadas = spam_total = spam_casados = nofollow_total = nofollow_casados = 0
     total = casada = 0.0
     for fila in filas:
         url_to, url_from, dominio, aporte = fila[:4]
         es_spam = bool(fila[4]) if len(fila) > 4 else False
+        es_nofollow = bool(fila[5]) if len(fila) > 5 else False
         n += 1
         spam_total += es_spam
-        aporte = 0.0 if es_spam else float(aporte or 0)
+        nofollow_total += es_nofollow
+        aporte = 0.0 if es_spam or es_nofollow else float(aporte or 0)
         total += aporte
         uid = indice.buscar(url_to)
         if uid is None:
-            f = fuera.setdefault(url_to, {"url": url_to, "backlinks": 0, "spam": 0, "aportacion": 0.0,
-                                          "dominios": set()})
+            f = fuera.setdefault(url_to, {"url": url_to, "backlinks": 0, "nofollow": 0, "spam": 0,
+                                          "aportacion": 0.0, "dominios": set()})
             f["backlinks"] += 1
+            f["nofollow"] += es_nofollow
             f["spam"] += es_spam
             f["aportacion"] += aporte
             f["dominios"].add(dominio)
             continue
         casadas += 1
         spam_casados += es_spam
+        nofollow_casados += es_nofollow
         casada += aporte
-        d = por_url.setdefault(uid, {"backlinks": 0, "spam": 0, "aportacion": 0.0, "dominios": set(),
-                                     "origenes": []})
+        d = por_url.setdefault(uid, {"backlinks": 0, "nofollow": 0, "spam": 0, "aportacion": 0.0,
+                                     "dominios": set(), "origenes": []})
         d["backlinks"] += 1
+        d["nofollow"] += es_nofollow
         d["spam"] += es_spam
         d["aportacion"] += aporte
         d["dominios"].add(dominio)
@@ -374,7 +388,8 @@ def cruzar(filas: Iterable[tuple], urls: Iterable[tuple],
         f["aportacion"] = round(f["aportacion"], 4)
     return Cruce(por_url=por_url, filas=n, casadas=casadas, aportacion_total=total,
                  aportacion_casada=casada, no_rastreadas=no_rastreadas,
-                 spam=spam_total, spam_casados=spam_casados)
+                 spam=spam_total, spam_casados=spam_casados,
+                 nofollow=nofollow_total, nofollow_casados=nofollow_casados)
 
 
 def ultima_importacion(session, cliente_id):
@@ -387,10 +402,11 @@ def ultima_importacion(session, cliente_id):
             .order_by(BacklinkImport.created_at.desc(), BacklinkImport.id.desc()).first())
 
 
-def filas_de(session, importacion) -> list[tuple[str, str, str, float, bool | None]]:
+def filas_de(session, importacion) -> list[tuple[str, str, str, float, bool | None, bool | None]]:
     from shared.models import ExternalLink as E
 
-    return [tuple(f) for f in session.query(E.url_to, E.url_from, E.dominio_from, E.aportacion, E.spam)
+    return [tuple(f) for f in session.query(E.url_to, E.url_from, E.dominio_from, E.aportacion, E.spam,
+                                            E.nofollow)
             .filter(E.import_id == importacion.id).all()]
 
 

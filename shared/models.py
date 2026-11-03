@@ -733,8 +733,13 @@ class Url(Base):
     pagerank_externo_score = Column(Integer, nullable=True, default=None)
     # Backlinks dofollow del CSV que caen en esta URL, y lo que aportan.
     backlinks_externos = Column(Integer, nullable=True, default=None)
-    # Cuantos de esos marca el proveedor como spam (no aportan autoridad).
+    # Los nofollow, ugc y sponsored: no aportan, pero cuentan para inventariar.
+    backlinks_nofollow = Column(Integer, nullable=True, default=None)
+    # Cuantos de todos (dofollow y nofollow) marca el proveedor como spam.
     backlinks_spam = Column(Integer, nullable=True, default=None)
+    # Que parte de todos es spam, 0-100 con un decimal; NULL si la URL no
+    # tiene backlinks (no es un 0 %).
+    backlinks_spam_pct = Column(Float, nullable=True, default=None)
     autoridad_externa = Column(Float, nullable=True, default=None)
     # Visitas de Googlebot VERIFICADO segun los logs del cliente (decision
     # 213); NULL sin logs, 0 = el periodo del log no la vio.
@@ -1528,18 +1533,22 @@ class BacklinkImport(Base):
     # el censo es de hoy y el indice de backlinks, de cuando sea.
     fecha_dato = Column(Date, nullable=True)
     filas = Column(Integer, nullable=False, default=0)
-    # Lo que se tiro al leer: nofollow/ugc/sponsored, perdidos, sin URL.
+    # Lo que se tiro al leer: perdidos, sin URL (y, hasta noviembre de 2026,
+    # los nofollow/ugc/sponsored).
     descartadas = Column(JSON, nullable=True)
-    # Dofollow que el proveedor marca como spam (se guardan, no aportan).
+    # Los que el proveedor marca como spam (se guardan, no aportan).
     # NULL = el export no trae esa columna.
     spam = Column(Integer, nullable=True)
+    # Los nofollow/ugc/sponsored (se guardan, no aportan). NULL = importacion
+    # de antes de guardarlos.
+    nofollow = Column(Integer, nullable=True)
     columnas = Column(JSON, nullable=True)
     cortado = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class ExternalLink(Base):
-    """Un backlink dofollow de una importacion (decision 212).
+    """Un backlink vivo de una importacion (decision 212).
 
     Se guardan TODOS, tambien los que no casan con ningun censo: las URLs
     antiguas con enlaces son de lo mas valioso (un 404 con autoridad).
@@ -1556,6 +1565,9 @@ class ExternalLink(Base):
     aportacion = Column(Float, nullable=False, default=1.0)
     # «Is spam» de Ahrefs: True no aporta autoridad; NULL, sin el dato.
     spam = Column(Boolean, nullable=True)
+    # nofollow, ugc o sponsored: no aporta autoridad. NULL en las filas de
+    # antes de guardarlos (todas eran dofollow).
+    nofollow = Column(Boolean, nullable=True)
 
 
 class AdapterEntity(Base):

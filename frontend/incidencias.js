@@ -1149,7 +1149,7 @@ const DETALLE_LABEL = {
   trampa: 'tipo', parte_del_censo: 'parte del rastreo', fechas_futuras: 'con fechas a más de dos años',
   combinaciones: 'combinaciones de filtros', mismo_filtro_en_otro_orden: 'mismos filtros en otro orden',
   dias_de_log: 'días de log', con_error: 'con error', codigos: 'códigos',
-  backlinks: 'backlinks', dominios: 'dominios que enlazan', autoridad: 'autoridad que aporta', origenes: 'enlazada desde',
+  backlinks: 'backlinks', nofollow: 'de ellos nofollow', spam: 'de ellos spam', dominios: 'dominios que enlazan', autoridad: 'autoridad que aporta', origenes: 'enlazada desde',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
   // Accesibilidad con axe (decisión 174)
