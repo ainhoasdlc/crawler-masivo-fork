@@ -733,6 +733,8 @@ class Url(Base):
     pagerank_externo_score = Column(Integer, nullable=True, default=None)
     # Backlinks dofollow del CSV que caen en esta URL, y lo que aportan.
     backlinks_externos = Column(Integer, nullable=True, default=None)
+    # Cuantos de esos marca el proveedor como spam (no aportan autoridad).
+    backlinks_spam = Column(Integer, nullable=True, default=None)
     autoridad_externa = Column(Float, nullable=True, default=None)
     # Visitas de Googlebot VERIFICADO segun los logs del cliente (decision
     # 213); NULL sin logs, 0 = el periodo del log no la vio.
@@ -1528,6 +1530,9 @@ class BacklinkImport(Base):
     filas = Column(Integer, nullable=False, default=0)
     # Lo que se tiro al leer: nofollow/ugc/sponsored, perdidos, sin URL.
     descartadas = Column(JSON, nullable=True)
+    # Dofollow que el proveedor marca como spam (se guardan, no aportan).
+    # NULL = el export no trae esa columna.
+    spam = Column(Integer, nullable=True)
     columnas = Column(JSON, nullable=True)
     cortado = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
@@ -1549,6 +1554,8 @@ class ExternalLink(Base):
     url_from = Column(Text, nullable=False)
     dominio_from = Column(String(255), nullable=True)
     aportacion = Column(Float, nullable=False, default=1.0)
+    # «Is spam» de Ahrefs: True no aporta autoridad; NULL, sin el dato.
+    spam = Column(Boolean, nullable=True)
 
 
 class AdapterEntity(Base):

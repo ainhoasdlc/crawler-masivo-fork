@@ -29,7 +29,8 @@ GUARDADAS = 3
 def _resumen(imp: BacklinkImport, en_uso: bool) -> dict:
     return {"id": imp.id, "fuente": imp.fuente, "fichero": imp.fichero,
             "fecha_dato": imp.fecha_dato.isoformat() if imp.fecha_dato else None,
-            "filas": imp.filas, "descartadas": imp.descartadas or {}, "columnas": imp.columnas or {},
+            "filas": imp.filas, "spam": imp.spam, "descartadas": imp.descartadas or {},
+            "columnas": imp.columnas or {},
             "cortado": bool(imp.cortado), "subido": imp.created_at.isoformat() if imp.created_at else None,
             "en_uso": en_uso}
 
@@ -74,6 +75,7 @@ def subir(cliente_id: uuid.UUID, fichero: UploadFile = File(...),
         raise HTTPException(status_code=422, detail="El fichero no tiene ningún backlink dofollow y vivo")
     imp = BacklinkImport(cliente_id=cliente_id, fuente=lectura.fuente, fichero=(fichero.filename or "")[:255],
                          fecha_dato=fecha_dato, filas=len(lectura.filas), cortado=lectura.cortado,
+                         spam=lectura.spam if "spam" in lectura.columnas else None,
                          columnas=lectura.columnas,
                          descartadas={"nofollow": lectura.descartadas_nofollow,
                                       "perdidas": lectura.descartadas_perdidas,

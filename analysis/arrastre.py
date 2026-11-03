@@ -65,7 +65,7 @@ CALCULADAS = (
     "click_depth", "gsc_clics", "gsc_impresiones", "gsc_posicion", "indexable",
     "noindex", "bloqueada_googlebot", "inlinks_count", "outlinks_count",
     "external_outlinks_count", "unique_inlinks_count", "pagerank", "pagerank_raw",
-    "pagerank_score", "pagerank_externo_score", "backlinks_externos",
+    "pagerank_score", "pagerank_externo_score", "backlinks_externos", "backlinks_spam",
     "autoridad_externa", "googlebot_visitas", "googlebot_ultima",
     "near_duplicate_count", "closest_similarity", "in_sitemap", "segmento",
 )

@@ -23,6 +23,12 @@ SEMRUSH = ("Page ascore,Source title,Source url,Target url,Anchor,External links
            "Sponsored,Ugc,First seen,Last seen,New link,Lost link\n"
            "45,Uno,https://uno.com/a,https://x.com/,inicio,4,10,false,false,false,2026-01-01,2026-10-01,false,false\n"
            "30,Dos,https://dos.com/b,https://x.com/b,b,0,3,true,false,false,2026-01-01,2026-10-01,false,false\n")
+# «Is spam» de Ahrefs: el tercero es spam y nofollow, y se descarta como nofollow.
+AHREFS_SPAM = ("Referring page URL\tUR\tExternal links\tTarget URL\tNofollow\tIs spam\n"
+               "https://bueno.com/a\t30\t2\thttps://x.com/\tfalse\tfalse\n"
+               "https://red.shop/1\t10\t0\thttps://x.com/\tfalse\ttrue\n"
+               "https://red.site/2\t10\t0\thttps://x.com/viejo\tfalse\ttrue\n"
+               "https://red.online/3\t10\t0\thttps://x.com/\ttrue\ttrue\n")
 MAJESTIC = ("Source URL,Target URL,Anchor Text,SourceCitationFlow,SourceTrustFlow,FlagNoFollow,FlagDeleted\n"
             "https://m.com/1,https://x.com/c,c,22,10,-,-\n"
             "https://m.com/2,https://x.com/d,d,30,10,+,-\n")
@@ -46,6 +52,28 @@ def test_semrush_y_majestic():
     lec = B.leer_csv(MAJESTIC.encode("utf-8-sig"))
     assert lec.fuente == "majestic" and lec.filas[0]["aportacion"] == pytest.approx(22.0)
     assert len(lec.filas) == 1 and lec.descartadas_nofollow == 1, "el «+» de Majestic es nofollow"
+
+
+def test_el_spam_de_ahrefs_se_guarda_y_no_aporta():
+    lec = B.leer_csv(AHREFS_SPAM.encode("utf-16"))
+    assert (lec.spam, lec.descartadas_nofollow) == (2, 1)
+    assert [f["spam"] for f in lec.filas] == [False, True, True]
+    assert lec.columnas["spam"] == "Is spam"
+    filas = [(f["url_to"], f["url_from"], f["dominio_from"], f["aportacion"], f["spam"]) for f in lec.filas]
+    c = B.cruzar(filas, [(1, "https://x.com/")])
+    d = c.por_url[1]
+    assert (d["backlinks"], d["spam"]) == (2, 1), "el spam cuenta como backlink"
+    assert d["aportacion"] == pytest.approx(30 / 3) and d["origenes"] == ["https://bueno.com/a"], "y no aporta"
+    assert (c.filas, c.casadas, c.spam, c.spam_casados) == (3, 2, 2, 1)
+    assert c.aportacion_total == pytest.approx(10.0)
+    assert (c.no_rastreadas[0]["spam"], c.no_rastreadas[0]["aportacion"]) == (1, 0)
+
+
+def test_sin_columna_de_spam_no_se_afirma_nada():
+    assert all(f["spam"] is None for f in B.leer_csv(AHREFS.encode("utf-16")).filas)
+    assert B.leer_csv(SEMRUSH.encode()).spam == 0
+    # Las filas de cuatro campos (un cruce de antes) siguen valiendo.
+    assert B.cruzar([("https://x.com/", "https://a.com/", "a.com", 2.0)], [(1, "https://x.com/")]).spam == 0
 
 
 @pytest.mark.parametrize("texto,esperado", [
@@ -99,9 +127,11 @@ def test_el_cruce_prueba_sin_la_query_y_guarda_lo_que_no_casa():
              ("https://x.com/antigua", "https://d.com/", "d.com", 1.0)]
     c = B.cruzar(filas, urls)
     assert set(c.por_url) == {1, 2}
-    assert c.por_url[1] == {"backlinks": 1, "aportacion": 2.0, "dominios": 1, "origenes": ["https://a.com/"]}
+    assert c.por_url[1] == {"backlinks": 1, "spam": 0, "aportacion": 2.0, "dominios": 1,
+                            "origenes": ["https://a.com/"]}
     assert (c.filas, c.casadas, c.parte_casada) == (5, 2, 0.4)
-    assert c.no_rastreadas[0] == {"url": "https://x.com/antigua", "backlinks": 2, "aportacion": 6.0, "dominios": 2}
+    assert c.no_rastreadas[0] == {"url": "https://x.com/antigua", "backlinks": 2, "spam": 0, "aportacion": 6.0,
+                                  "dominios": 2}
 
 
 # ---------------------------------------------------------------------------
