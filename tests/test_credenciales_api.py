@@ -82,7 +82,8 @@ def test_la_llave_se_sube_y_nunca_vuelve(entorno):
 @pytest.mark.parametrize("nombre, contenido, trozo", [
     ("DATAFORSEO_X", None, "GSC_"),
     ("GSC LIN3S", None, "Nombre no válido"),
-    ("GSC_LIN3S", json.dumps({"type": "authorized_user"}), "cuenta de servicio"),
+    ("GSC_LIN3S", json.dumps({"type": "external_account"}), "cuenta de servicio"),
+    ("GSC_LIN3S", json.dumps({"type": "authorized_user"}), "OAuth de usuario"),
 ])
 def test_lo_que_no_vale_es_un_422_que_dice_por_que(entorno, nombre, contenido, trozo):
     api, *_ = entorno
