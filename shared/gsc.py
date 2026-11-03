@@ -120,9 +120,17 @@ def leer_llave(texto: str) -> dict[str, Any]:
     except (TypeError, ValueError):
         raise LlaveNoValida("No es un JSON. Descarga la llave de la cuenta de servicio en "
                             "Google Cloud → IAM → Cuentas de servicio → Claves → Añadir clave → JSON.")
+    if isinstance(info, dict) and info.get("type") == "authorized_user":
+        # Local (rama local/gsc-oauth-usuario): el login de usuario con refresh
+        # token, como el de los MCP de Search Console. Sin clave privada.
+        for campo in ("client_id", "client_secret", "refresh_token"):
+            if not info.get(campo):
+                raise LlaveNoValida(f"Al OAuth de usuario le falta «{campo}»: está incompleto.")
+        return info
     if not isinstance(info, dict) or info.get("type") != "service_account":
         raise LlaveNoValida("Es un JSON, pero no la llave de una cuenta de servicio "
-                            "(falta \"type\": \"service_account\"). Un OAuth de usuario no vale.")
+                            "(falta \"type\": \"service_account\") ni un OAuth de usuario "
+                            "(\"type\": \"authorized_user\").")
     for campo in ("client_email", "private_key", "token_uri"):
         if not info.get(campo):
             raise LlaveNoValida(f"A la llave le falta «{campo}»: está incompleta.")
@@ -133,6 +141,9 @@ def leer_llave(texto: str) -> dict[str, Any]:
 
 def publico(info: dict[str, Any]) -> dict[str, Any]:
     """Lo unico que se ensena de una llave: lo que no es secreto."""
+    if info.get("type") == "authorized_user":
+        return {"client_email": info.get("account") or "OAuth de usuario",
+                "project_id": info.get("quota_project_id")}
     return {"client_email": info.get("client_email"), "project_id": info.get("project_id")}
 
 
@@ -166,7 +177,13 @@ class Consultor:
         from google.auth.transport.requests import AuthorizedSession
         from google.oauth2 import service_account
 
-        creds = service_account.Credentials.from_service_account_info(info, scopes=[ALCANCE])
+        if info.get("type") == "authorized_user":
+            from google.oauth2.credentials import Credentials
+
+            # Sin scopes: se renueva con los que se concedieron en el login.
+            creds = Credentials.from_authorized_user_info(info)
+        else:
+            creds = service_account.Credentials.from_service_account_info(info, scopes=[ALCANCE])
         self._s = AuthorizedSession(creds)
 
     def _peticion(self, metodo: str, url: str, **kw) -> dict:
