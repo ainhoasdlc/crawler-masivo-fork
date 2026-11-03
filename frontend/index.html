@@ -4596,6 +4596,18 @@
             <!-- WordPress por su REST API (decisiones 161 y 168). Solo si el job
                  trae el resumen del adaptador y hubo rastro de WordPress: un
                  rastreo anterior o con el adaptador apagado no dice «no es WordPress». -->
+            <!-- Shopify (avisos_de_shopify): detectado por su robots.txt o su CDN -->
+            <template x-if="resumenShopify(job)">
+              <div class="card chk" data-testid="tarjeta-shopify" x-data="{ get sh() { return resumenShopify(job) } }">
+                <div class="card-header"><h2>Shopify</h2>
+                  <span class="text-sm text-dim" x-text="sh.evidencia"></span></div>
+                <p class="text-sm" x-text="sh.cifras"></p>
+                <p class="text-sm text-dim" x-show="!sh.hallazgos">Ningún patrón de Shopify con problema en este rastreo.</p>
+                <p class="text-sm" x-show="sh.hallazgos">
+                  <span x-text="fmt.n(sh.hallazgos, 'hallazgo propio de Shopify', 'hallazgos propios de Shopify') + ' en la pestaña '"></span>
+                  <a href="#" @click.prevent="openExplorer({ tab: 'a_shopify' })">Shopify</a> del explorador de incidencias.</p>
+              </div>
+            </template>
             <template x-if="resumenWordPress(job)">
               <div class="card chk wp-tarjeta" data-testid="tarjeta-wordpress" x-data="{ get wp() { return resumenWordPress(job) }, nsAbierto: false }" x-init="cargarWpAssets()">
                 <div class="card-header"><h2>WordPress</h2>

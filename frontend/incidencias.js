@@ -727,6 +727,51 @@ const ISSUE_INFO = {
     google: 'Una página que no debería existir y responde 200 es un soft 404; si además enlaza a la siguiente, es una trampa de rastreo sin fin que gasta presupuesto en páginas vacías.',
     arreglo: 'Que el tema o el plugin de paginación devuelva 404 pasada la última página (es lo que hace WordPress de serie) y no pinte el enlace «siguiente» en la última.',
   },
+  'shopify_enlace_a_producto_en_coleccion': {
+    que: 'Enlaces internos a fichas con la ruta de la colección (/collections/x/products/y). Shopify sirve la misma ficha en /products/y y la canonicaliza ahí, pero los listados enlazan a la otra. Sale una vez por host, con cuántos enlaces, desde cuántas páginas y ejemplos.',
+    google: 'Los enlaces internos van a una URL que no es la canónica: Google rastrea las dos y la señal del enlazado se reparte entre ellas en vez de ir entera a la ficha.',
+    arreglo: 'En la plantilla de colección del tema, cambiar {{ product.url | within: collection }} por {{ product.url }}. Ojo: si las migas de pan de la ficha salen de esa ruta, desaparecen; constrúyelas con un metacampo de colección padre. No redirigir esas URLs (Shopify no deja) ni bloquearlas en robots.txt.',
+  },
+  'shopify_enlace_a_variante': {
+    que: 'Enlaces internos a fichas con ?variant= (las muestras de color o talla del tema). Sale una vez por host.',
+    google: 'Cada variante es otra URL de la misma ficha, con canonical a la limpia: gasta rastreo y reparte enlazado.',
+    arreglo: 'Que las muestras enlacen a la URL canónica del producto y cambien la variante sin URL nueva. Ficha propia solo si la variante tiene demanda de búsqueda.',
+  },
+  'shopify_enlace_a_pagina_1': {
+    que: 'Enlaces a la página 1 de una colección como ?page=1 (el fragmento de paginación del tema). Sale una vez por host.',
+    google: 'Es la colección limpia con otra URL: Google la rastrea aparte y el enlace a la colección se reparte entre las dos.',
+    arreglo: 'En el fragmento de paginación, enlazar la página 1 a la colección limpia (collection.url). Las páginas 2 y siguientes se quedan como están, indexables y con canonical propio.',
+  },
+  'shopify_parametros_de_apps': {
+    que: 'Enlaces internos con parámetros de apps: el carrusel de recomendaciones (pr_prod_strat, pr_rec_id, pr_seq…) o la búsqueda predictiva (_pos, _sid, _ss). Sale una vez por host. Las recomendaciones se cargan por JavaScript: sin rastreo con render salen menos de las que hay.',
+    google: 'Tienen canonical a la ficha limpia, pero el enlace interno apunta a la parametrizada: Google las rastrea y acaba indexando parte de ellas.',
+    arreglo: 'Arreglar el origen en el tema: enlazar a /products/{{ product.handle }} en la sección de recomendaciones. Si ya están indexadas, no bloquearlas todavía en robots.txt: primero que Google vea el canonical, después bloquear. Nunca noindex por JavaScript.',
+  },
+  'shopify_url_tecnica': {
+    que: 'URLs técnicas de Shopify en el rastreo o en los enlaces: .js.js (el JSON de la variante), customer_authentication (cuentas de cliente) o /web-pixels (sandbox de los píxeles). Sale una vez por host.',
+    google: 'No son páginas: Shopify ya sirve algunas con noindex, pero Google las descubre y gasta rastreo en ellas.',
+    arreglo: 'En robots.txt.liquid, dentro del grupo * : Disallow: /*.js.js*, Disallow: /*customer_authentication* y Disallow: /web-pixels*. No eliminar los píxeles: rompería la medición.',
+  },
+  'shopify_coleccion_vacia': {
+    que: 'Colecciones que responden 200 y no enlazan a ningún producto (temporada, promoción, venta privada). Solo se afirma si otras colecciones del rastreo sí pintan productos en el HTML. Sale una vez por host, con cuántas son indexables y cuántas están en el sitemap.',
+    google: 'Una página de listado sin productos es un soft 404: Google la trata como vacía, y Shopify la sigue metiendo en el sitemap.',
+    arreglo: 'Si no va a volver, 301 a la colección superior. Si vuelve cada temporada, mantenerla útil (próximamente, avísame, productos relacionados) y reutilizar la misma URL cada año en vez de crear otra con -1. Antes de nada, mirar si tiene tráfico en Search Console.',
+  },
+  'shopify_canonical_producto_a_coleccion': {
+    que: 'Fichas de producto cuyo canonical apunta a una colección. Suele venir de un metacampo de canonical rellenado desde el ERP o de una app. Sale una vez por host.',
+    google: 'Un canonical a una página distinta le dice a Google que la ficha no es la versión buena: puede dejar de indexarla y quedarse con la colección.',
+    arreglo: 'Corregir el metacampo o la lógica del canonical: cada ficha con canonical a sí misma o, si es un color de un mismo modelo, a la ficha hermana con más demanda. Nunca a una colección.',
+  },
+  'shopify_coleccion_ver_todo': {
+    que: 'Colecciones «ver todo» o «all» indexables. Suelen crearse para el menú y repiten los productos de la colección principal. Sale una vez por host.',
+    google: 'Dos colecciones con los mismos productos compiten por las mismas búsquedas y se reparten el enlazado.',
+    arreglo: 'Una sola colección principal con todos los productos; el «ver todo» del menú enlaza a ella. Las demás, con 301 a la que más demanda tenga en Search Console.',
+  },
+  'shopify_enlace_con_barra_final': {
+    que: 'Enlaces internos a /products/x/, /collections/x/ o /pages/x/ con barra final. Shopify responde a las dos versiones. Sale una vez por host.',
+    google: 'Si la versión con barra lleva canonical a la buena no es grave, pero el enlace va a una URL que no es la canónica y se rastrean las dos.',
+    arreglo: 'Enlazar siempre la versión sin barra. En Shopify no hay .htaccess ni se puede poner un proxy delante: la solución es el enlace y el canonical de la plantilla.',
+  },
   'solo_enlazada_por_redireccion': {
     que: 'Solo se llega a la página a través de una redirección: los enlaces internos apuntan a la URL vieja.',
     google: 'Acaba dejando de rastrear la URL vieja, y con ella el camino a esta.',
@@ -995,6 +1040,15 @@ const ISSUE_LABEL_EXTRA = {
   wp_adjunto_indexable: 'WordPress: páginas de adjunto indexables',
   wp_taxonomia_anemica: 'WordPress: categorías o etiquetas casi vacías',
   wp_paginacion_sin_fin: 'WordPress: paginación que sigue dando 200',
+  shopify_enlace_a_producto_en_coleccion: 'Shopify: enlaces a fichas dentro de colección',
+  shopify_enlace_a_variante: 'Shopify: enlaces a variantes (?variant=)',
+  shopify_enlace_a_pagina_1: 'Shopify: enlaces a ?page=1',
+  shopify_parametros_de_apps: 'Shopify: enlaces con parámetros de apps',
+  shopify_url_tecnica: 'Shopify: URLs técnicas que gastan rastreo',
+  shopify_coleccion_vacia: 'Shopify: colecciones sin productos',
+  shopify_canonical_producto_a_coleccion: 'Shopify: canonical de ficha a una colección',
+  shopify_coleccion_ver_todo: 'Shopify: colecciones «ver todo» que duplican',
+  shopify_enlace_con_barra_final: 'Shopify: enlaces con barra final',
   redireccion_por_javascript: 'Redirección por JavaScript',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',

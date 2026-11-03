@@ -55,6 +55,7 @@ from analysis import avisos_de_nosnippet
 from analysis import avisos_de_entidad
 from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
+from analysis import avisos_de_shopify
 from analysis import avisos_de_backlinks
 from analysis import avisos_de_logs
 from analysis import avisos_de_trampas
@@ -479,6 +480,9 @@ class SEOAnalyzer:
         # WordPress por su REST API (decision 161): despues de la
         # indexabilidad, los enlaces y el sitemap, que es con lo que se cruza.
         self._fase("avisos_de_wordpress.avisar_sin_tumbar", avisos_de_wordpress.avisar_sin_tumbar, self)
+        # Shopify (P1-P28 del checklist de SEO tecnico): lo que la plataforma
+        # hace de serie, detectado por el robots.txt; tambien tras los enlaces.
+        self._fase("avisos_de_shopify.avisar_sin_tumbar", avisos_de_shopify.avisar_sin_tumbar, self)
         # Search Console (decision 142): despues de la indexabilidad y de los
         # entrantes, que es con lo que se cruza.
         self._fase("avisos_de_gsc.avisar", avisos_de_gsc.avisar, self)
