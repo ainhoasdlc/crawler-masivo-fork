@@ -7475,6 +7475,10 @@ const EXP_TABS = [
   // abierta.
   { key: 'a_wordpress', label: 'WordPress',    icon: 'layout-template', filter: { is_internal: true }, ambito: ['wp_publicado_no_rastreado','wp_adjunto_indexable','wp_taxonomia_anemica','wp_paginacion_sin_fin'],
     columns: ['url','status_code','indexable','inlinks_count','in_sitemap'] },
+  // Shopify (P1-P28 del checklist de SEO tecnico): agrupado por host; solo hay
+  // chips si el analisis detecto Shopify por su robots.txt o su CDN.
+  { key: 'a_shopify', label: 'Shopify',      icon: 'shopping-bag', filter: { is_internal: true }, ambito: ['shopify_enlace_a_producto_en_coleccion','shopify_enlace_a_variante','shopify_enlace_a_pagina_1','shopify_parametros_de_apps','shopify_url_tecnica','shopify_coleccion_vacia','shopify_canonical_producto_a_coleccion','shopify_coleccion_ver_todo','shopify_enlace_con_barra_final'],
+    columns: ['url','status_code','indexable','canonical_href','inlinks_count','in_sitemap'] },
   { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','soft_404_plantilla','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   // Paridad movil/escritorio (decision 119): solo hay chips si el censo se
@@ -7913,6 +7917,26 @@ function camposDeEstado(estado) {
     valor: typeof v === 'string' ? v : JSON.stringify(v, null, 1),
     largo: typeof v !== 'string' || v.length > 160,
   }));
+}
+
+// Shopify (analysis/avisos_de_shopify.py): `jobs.adapters.shopify`, que solo
+// existe si el analisis lo detecto. null si no.
+function resumenShopify(job) {
+  const sh = job && job.adapters && job.adapters.shopify;
+  if (!sh || typeof sh !== 'object' || !sh.detectado) return null;
+  const a = (sh.analisis && typeof sh.analisis === 'object') ? sh.analisis : {};
+  const ev = (Array.isArray(sh.evidencia) ? sh.evidencia : [])
+    .map(e => ({ robots_txt: 'detectado por su robots.txt', cdn_shopify: 'detectado por su CDN' })[e] || e);
+  const cifras = [];
+  if (a.productos != null) cifras.push(fmt.n(a.productos, 'ficha de producto', 'fichas de producto'));
+  if (a.colecciones != null) cifras.push(fmt.n(a.colecciones, 'colección', 'colecciones')
+    + (a.colecciones ? ' (' + fmt.num(a.colecciones_con_productos || 0) + ' con productos en el HTML)' : ''));
+  const emitidos = (a.emitidos && typeof a.emitidos === 'object') ? a.emitidos : {};
+  return {
+    evidencia: ev.join(' · '),
+    cifras: cifras.length ? 'En el rastreo: ' + cifras.join(', ') + '.' : '',
+    hallazgos: Object.values(emitidos).reduce((s, n) => s + (Number(n) || 0), 0),
+  };
 }
 
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
