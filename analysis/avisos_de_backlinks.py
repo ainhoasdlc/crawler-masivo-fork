@@ -15,6 +15,9 @@ Con los backlinks del CSV del cliente ya cruzados con el censo (lo hace
   propio que sustituyera a `orphan_page` daria por «resueltas» las huerfanas
   al comparar un censo analizado antes de subir el CSV con uno de despues.
 
+Lo que solo recibe backlinks que el proveedor marca como spam no se avisa:
+redirigir un 404 al que solo enlaza una red de spam no recupera nada.
+
 Un backlink que llega a una 301 no se avisa: la arista de redireccion lo pasa
 a su destino, y eso es lo que tiene que pasar. Best-effort entero (decision
 40): si algo falla, se deshace solo lo suyo.
@@ -33,7 +36,7 @@ HUERFANAS = ("orphan_page", "sitemap_orphan", "huerfana_con_trafico")
 
 
 def _detalle(d) -> dict:
-    return {"backlinks": d["backlinks"], "dominios": d["dominios"],
+    return {"backlinks": d["backlinks"], "spam": d.get("spam", 0), "dominios": d["dominios"],
             "autoridad": round(d["aportacion"], 4), "origenes": d["origenes"]}
 
 
@@ -67,6 +70,8 @@ def avisar(an) -> int:
         detalle = _detalle(d)
         estado = estado or ""
         if redirect or (status is not None and 300 <= status < 400):
+            continue
+        if d["backlinks"] <= d.get("spam", 0):
             continue
         # Antes que el error: el rastreo guarda lo bloqueado SIN codigo (no lo
         # pidio), y salia como «da error o no responde».

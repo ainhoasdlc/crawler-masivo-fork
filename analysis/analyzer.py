@@ -4939,7 +4939,8 @@ class SEOAnalyzer:
             with self.session.begin_nested():
                 self.session.execute(text(
                     "UPDATE urls SET pagerank_externo_score = NULL, backlinks_externos = NULL, "
-                    "autoridad_externa = NULL WHERE job_id = :jid AND backlinks_externos IS NOT NULL"
+                    "backlinks_spam = NULL, autoridad_externa = NULL "
+                    "WHERE job_id = :jid AND backlinks_externos IS NOT NULL"
                 ), {"jid": self.job_id})
                 imp = ultima_importacion(self.session, self._cliente_id)
                 if imp is None:
@@ -4985,20 +4986,22 @@ class SEOAnalyzer:
         self.session.execute(text("DROP TABLE IF EXISTS pr_ext_tmp"))
         self.session.execute(text(
             "CREATE TEMP TABLE pr_ext_tmp (id BIGINT PRIMARY KEY, score INTEGER, "
-            "backlinks INTEGER, autoridad DOUBLE PRECISION)"))
+            "backlinks INTEGER, spam INTEGER, autoridad DOUBLE PRECISION)"))
         filas = []
         for i, uid in enumerate(ids_ordenados):
             d = cruce.por_url.get(int(uid))
             filas.append({"id": int(uid), "score": int(puntuacion[i]),
                           "backlinks": d["backlinks"] if d else 0,
+                          "spam": d.get("spam", 0) if d else 0,
                           "autoridad": round(d["aportacion"], 6) if d else 0.0})
         for i in range(0, len(filas), 10_000):
             self.session.execute(text(
-                "INSERT INTO pr_ext_tmp (id, score, backlinks, autoridad) "
-                "VALUES (:id, :score, :backlinks, :autoridad)"), filas[i:i + 10_000])
+                "INSERT INTO pr_ext_tmp (id, score, backlinks, spam, autoridad) "
+                "VALUES (:id, :score, :backlinks, :spam, :autoridad)"), filas[i:i + 10_000])
         self.session.execute(text(
             "UPDATE urls SET pagerank_externo_score = t.score, backlinks_externos = t.backlinks, "
-            "autoridad_externa = t.autoridad FROM pr_ext_tmp t WHERE urls.id = t.id"))
+            "backlinks_spam = t.spam, autoridad_externa = t.autoridad "
+            "FROM pr_ext_tmp t WHERE urls.id = t.id"))
         self.session.execute(text("DROP TABLE IF EXISTS pr_ext_tmp"))
 
         # De la autoridad que llega DESDE FUERA (lo casado), donde cae de
@@ -5016,6 +5019,8 @@ class SEOAnalyzer:
             "fecha_dato": imp.fecha_dato.isoformat() if imp.fecha_dato else None,
             "subido": imp.created_at.isoformat() if imp.created_at else None,
             "backlinks": cruce.filas, "casados": cruce.casadas, "parte_casada": cruce.parte_casada,
+            # Lo que el proveedor marca como spam: cuenta en `backlinks`, no aporta.
+            "spam": cruce.spam, "spam_casados": cruce.spam_casados,
             "paginas_con_backlinks": len(cruce.por_url), "beta": beta,
             "entra_en": por_categoria, "reparto": reparto,
             "desperdiciado": prk.desperdiciado(reparto),

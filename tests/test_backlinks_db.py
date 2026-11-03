@@ -93,6 +93,56 @@ def test_pagerank_externo_y_avisos(sesion, con_backlinks):
     assert det["x"] == 1 and det["backlinks"] == 1, "la huerfana lleva sus backlinks en el detalle"
 
 
+def _con_spam(sesion, con_backlinks):
+    """Dos backlinks spam con mucha aportacion: uno al 404 que ya tiene uno
+    bueno y otro a un 404 que solo recibe spam. Analiza y avisa."""
+    from analysis import avisos_de_backlinks
+    from analysis.analyzer import SEOAnalyzer
+
+    j, filas, c = con_backlinks
+    solo_spam = Url(job_id=j.id, url=BASE + "/spam-404", url_hash="spam-404", is_internal=True, status_code=404,
+                    is_html=True, indexable=False, indexability_status="4xx Client Error", crawl_depth=2)
+    sesion.add(solo_spam)
+    imp = sesion.query(BacklinkImport).filter(BacklinkImport.cliente_id == c.id).one()
+    imp.spam = 2
+    for destino in ("https://x.com/roto", "https://x.com/spam-404"):
+        sesion.add(ExternalLink(import_id=imp.id, url_to=destino, url_from="https://red.shop/p",
+                                dominio_from="red.shop", aportacion=50.0, spam=True))
+    sesion.commit()
+    an = SEOAnalyzer(sesion, str(j.id))
+    an.compute_pagerank()
+    avisos_de_backlinks.avisar(an)
+    an._flush_issues()
+    sesion.commit()
+    return j, filas, solo_spam
+
+
+def test_el_spam_se_cuenta_no_aporta_y_no_avisa(sesion, con_backlinks):
+    """Un backlink spam suma en `backlinks_spam` y no en la autoridad; un 404
+    al que solo enlaza spam no es «backlinks a error»."""
+    j, filas, solo_spam = _con_spam(sesion, con_backlinks)
+    ext = sesion.get(Job, j.id).pagerank_resumen["externo"]
+    assert (ext["backlinks"], ext["spam"], ext["spam_casados"]) == (8, 2, 2)
+    assert ext["entra_en"]["error"] == pytest.approx(8 / 16, abs=1e-3), "los 50 del spam no cuentan"
+    roto = sesion.execute(select(Url.backlinks_externos, Url.backlinks_spam, Url.autoridad_externa)
+                          .where(Url.id == filas["/roto"].id)).one()
+    assert tuple(roto) == (2, 1, 8.0)
+    tipos = {(t, u) for t, u in sesion.execute(
+        select(Issue.issue_type, Issue.url_id).where(Issue.job_id == j.id, Issue.issue_type == "backlinks_a_error"))}
+    assert ("backlinks_a_error", filas["/roto"].id) in tipos
+    assert ("backlinks_a_error", solo_spam.id) not in tipos, "solo spam: nada que recuperar"
+
+
+def test_el_informe_cuenta_el_spam(sesion, con_backlinks):
+    pytest.importorskip("fastapi")
+    from api.routers.results import _backlinks_del_informe
+
+    j, _, _ = _con_spam(sesion, con_backlinks)
+    inf = _backlinks_del_informe(sesion, sesion.get(Job, j.id))
+    assert (inf["backlinks"], inf["spam"], inf["a_error"]) == (8, 2, 1)
+    assert {"url": BASE + "/roto", "backlinks": 2, "spam": 1} in inf["paginas"]
+
+
 def test_sin_aristas_los_avisos_salen_igual(sesion, con_backlinks):
     """El cruce no depende del grafo: un censo sin enlaces internos tambien
     avisa del 404 con backlinks."""

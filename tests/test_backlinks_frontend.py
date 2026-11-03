@@ -36,6 +36,10 @@ def test_lo_que_entra_de_fuera_y_lo_que_se_pierde():
     assert any("redirecciones" in f for f in b["frases"])
     assert b["poco_casado"] is True, "por debajo del 90 % se avisa"
     assert b["no_rastreadas"][0]["url"] == "https://x.com/vieja"
+    con_spam = _bloque({"pagerank_resumen": {"externo": {**EXTERNO, "spam": 120}}})
+    assert con_spam["frases"][1] == ("120 de 200 (60 %) están marcados como spam por Ahrefs: se cuentan, "
+                                     "pero no suman autoridad en el PageRank desde fuera.")
+    assert con_spam["spam"] == 120 and b["spam"] == 0
     casi = {**EXTERNO, "parte_casada": 0.95, "entra_en": {"indexable": 1.0}}
     b = _bloque({"pagerank_resumen": {"externo": casi}})
     assert b["poco_casado"] is False and len(b["frases"]) == 1

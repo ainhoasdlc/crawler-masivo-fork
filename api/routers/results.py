@@ -108,6 +108,7 @@ SORT_COLUMNS = {
     "pagerank_raw": Url.pagerank_raw,
     "pagerank_externo_score": Url.pagerank_externo_score,
     "backlinks_externos": Url.backlinks_externos,
+    "backlinks_spam": Url.backlinks_spam,
     "autoridad_externa": Url.autoridad_externa,
     "googlebot_visitas": Url.googlebot_visitas,
     "near_duplicate_count": Url.near_duplicate_count,
@@ -138,6 +139,7 @@ _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "pagerank_raw": (Url.pagerank_raw, False),
     "pagerank_externo_score": (Url.pagerank_externo_score, False),
     "backlinks_externos": (Url.backlinks_externos, False),
+    "backlinks_spam": (Url.backlinks_spam, False),
     "googlebot_visitas": (Url.googlebot_visitas, False),
     "near_duplicate_count": (Url.near_duplicate_count, False),
     "closest_similarity": (Url.closest_similarity, False),
@@ -1066,6 +1068,7 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "pagerank_score": ("PageRank (0-100)", lambda u: u.pagerank_score),
     "pagerank_externo_score": ("PageRank desde fuera (0-100)", lambda u: u.pagerank_externo_score),
     "backlinks_externos": ("Backlinks", lambda u: u.backlinks_externos),
+    "backlinks_spam": ("Backlinks spam", lambda u: u.backlinks_spam),
     "googlebot_visitas": ("Visitas Googlebot", lambda u: u.googlebot_visitas),
     "pagerank_raw": ("PageRank (x media)", lambda u: u.pagerank_raw),
     "pagerank": ("PageRank (0-10, antiguo)", lambda u: u.pagerank),
@@ -4190,6 +4193,27 @@ def _ia_del_informe(db: Session, job: Job) -> dict | None:
     return salida
 
 
+def _backlinks_del_informe(db: Session, job: Job) -> dict | None:
+    """Backlinks en el informe (decision 212): cuantos llegan, cuantos son spam
+    segun el proveedor (no aportan autoridad), las paginas que mas reciben y
+    lo que cae en errores. None sin CSV subido para el cliente."""
+    r = job.pagerank_resumen if isinstance(getattr(job, "pagerank_resumen", None), dict) else None
+    e = (r or {}).get("externo")
+    if not isinstance(e, dict) or not e.get("backlinks"):
+        return None
+    entra = e.get("entra_en") or {}
+    salida = {k: e.get(k) for k in ("fuente", "fecha_dato", "backlinks", "spam", "casados",
+                                     "paginas_con_backlinks")}
+    salida["perdida"] = round(float(entra.get("error") or 0) + float(entra.get("sin_respuesta") or 0), 4)
+    filas = (db.query(Url.url, Url.backlinks_externos, Url.backlinks_spam)
+             .filter(Url.job_id == job.id, Url.backlinks_externos > 0)
+             .order_by(Url.backlinks_externos.desc(), Url.id).limit(5).all())
+    salida["paginas"] = [{"url": u, "backlinks": b, "spam": s} for u, b, s in filas]
+    salida["a_error"] = (db.query(func.count(Issue.id))
+                         .filter(Issue.job_id == job.id, Issue.issue_type == "backlinks_a_error").scalar() or 0)
+    return salida
+
+
 def _raiz_del_sitio(semilla: str | None) -> str | None:
     """`https://host`: la primera semilla de una lista puede ser `/blog/`, y la
     cabecera de un informe del sitio entero no puede decir eso."""
@@ -4287,6 +4311,7 @@ def get_informe(
         "fiabilidad": fiabilidad,
         "trafico": _trafico_del_informe(db, job),
         "ia": _ia_del_informe(db, job),
+        "backlinks": _backlinks_del_informe(db, job),
         "generado": datetime.now(timezone.utc),
     }
 

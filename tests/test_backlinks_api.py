@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from shared.database import get_session  # noqa: E402
 from shared.models import BacklinkImport, Base, Client, ExternalLink  # noqa: E402
-from test_backlinks import AHREFS, SEMRUSH  # noqa: E402
+from test_backlinks import AHREFS, AHREFS_SPAM, SEMRUSH  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -67,6 +67,17 @@ def test_subir_un_export_de_ahrefs(entorno):
     assert j["fecha_dato"] == "2026-10-20" and j["dominios"] == 2
     with S() as s:
         assert s.query(ExternalLink).count() == 2
+
+
+def test_el_spam_se_cuenta_en_la_importacion(entorno):
+    api, S, cid = entorno
+    j = _subir(api, cid, AHREFS_SPAM.encode("utf-16")).json()
+    assert (j["filas"], j["spam"]) == (3, 2)
+    with S() as s:
+        assert sorted(x.spam for x in s.query(ExternalLink)) == [False, True, True]
+    # Sin la columna, NULL: no se afirma que no haya spam.
+    assert _subir(api, cid, AHREFS.encode("utf-16")).json()["spam"] is None
+    assert [i["spam"] for i in api.get(f"/api/clients/{cid}/backlinks").json()] == [None, 2]
 
 
 def test_se_guardan_las_tres_ultimas_y_la_primera_es_la_que_se_usa(entorno):

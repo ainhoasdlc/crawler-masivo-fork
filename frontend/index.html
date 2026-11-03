@@ -1729,6 +1729,8 @@
                     </div>
                     <div class="text-dim mt-30" x-show="(i.descartadas.nofollow || 0) + (i.descartadas.perdidas || 0) + (i.descartadas.sin_url || 0)"
                          x-text="'Fuera: ' + [[i.descartadas.nofollow, 'nofollow, ugc o sponsored'], [i.descartadas.perdidas, 'perdidos'], [i.descartadas.sin_url, 'sin URL']].filter(x => x[0]).map(x => fmt.num(x[0]) + ' ' + x[1]).join(' · ')"></div>
+                    <div class="text-orange mt-30" x-show="i.spam" data-testid="backlinks-spam"
+                         x-text="fmt.num(i.spam) + ' de ' + fmt.num(i.filas) + ' (' + fmt.pct(100 * i.spam / i.filas, 0) + ') marcados como spam por ' + (FUENTE_BACKLINKS[i.fuente] || i.fuente) + ': se guardan y se cuentan, pero no suman autoridad.'"></div>
                     <div class="text-orange mt-30" x-show="i.cortado">El fichero pasaba del tope de filas: se guardaron las primeras.</div>
                   </div>
                 </template>
@@ -1745,7 +1747,7 @@
                           x-text="backlinks.ocupado ? 'Subiendo…' : 'Subir'"></button>
                 </div>
                 <p class="text-sm mt-40" x-show="backlinks.ultimo" data-testid="backlinks-resultado"
-                   x-text="backlinks.ultimo && ('Leídas ' + fmt.num(backlinks.ultimo.leidas) + ' filas: ' + fmt.num(backlinks.ultimo.filas) + ' backlinks dofollow hacia ' + fmt.num(backlinks.ultimo.destinos) + ' URLs, desde ' + fmt.num(backlinks.ultimo.dominios) + ' dominios.')"></p>
+                   x-text="backlinks.ultimo && ('Leídas ' + fmt.num(backlinks.ultimo.leidas) + ' filas: ' + fmt.num(backlinks.ultimo.filas) + ' backlinks dofollow hacia ' + fmt.num(backlinks.ultimo.destinos) + ' URLs, desde ' + fmt.num(backlinks.ultimo.dominios) + ' dominios' + (backlinks.ultimo.spam ? ', ' + fmt.num(backlinks.ultimo.spam) + ' de ellos marcados como spam' : '') + '.')"></p>
               </div>
             </template>
               </div>
@@ -3270,7 +3272,7 @@
               <summary class="text-dim" x-text="'URLs con backlinks que el rastreo no encontró (' + fmt.num(bb.no_rastreadas.length) + ')'"></summary>
               <p class="text-dim">Suelen ser URLs antiguas o de campañas. Si dan error, redirigirlas a la página más parecida recupera su autoridad.</p>
               <ul><template x-for="u in bb.no_rastreadas" :key="u.url">
-                <li><span class="google-clics" x-text="fmt.n(u.backlinks, 'backlink', 'backlinks') + ' de ' + fmt.n(u.dominios, 'dominio', 'dominios')"></span>
+                <li><span class="google-clics" x-text="fmt.n(u.backlinks, 'backlink', 'backlinks') + ' de ' + fmt.n(u.dominios, 'dominio', 'dominios') + (u.spam ? ' (' + fmt.num(u.spam) + ' spam)' : '')"></span>
                   <span class="informe-url" x-text="u.url"></span></li>
               </template></ul>
             </details>
@@ -6396,6 +6398,37 @@
               </section>
             </template>
 
+            <!-- Backlinks (decision 212): cuantos, cuantos son spam y lo que se pierde -->
+            <template x-if="informe.backlinks">
+              <section data-testid="informe-backlinks">
+                <h2>Enlaces desde otros sitios</h2>
+                <p><strong x-text="fmt.num(informe.backlinks.backlinks)"></strong> enlaces dofollow según
+                  <span x-text="FUENTE_BACKLINKS[informe.backlinks.fuente] || informe.backlinks.fuente"></span><span x-show="informe.backlinks.fecha_dato" x-text="' (datos del ' + fmt.dia(informe.backlinks.fecha_dato) + ')'"></span>,
+                  hacia <strong x-text="fmt.num(informe.backlinks.paginas_con_backlinks)"></strong>
+                  <span x-text="informe.backlinks.paginas_con_backlinks === 1 ? 'página' : 'páginas'"></span> de este rastreo.</p>
+                <ul class="informe-alertas">
+                  <li x-show="informe.backlinks.spam" class="sev-warning" data-testid="informe-backlinks-spam">
+                    <strong x-text="fmt.num(informe.backlinks.spam) + ' de ' + fmt.num(informe.backlinks.backlinks) + ' (' + fmt.pct(100 * informe.backlinks.spam / informe.backlinks.backlinks, 0) + ')'"></strong>
+                    <span x-text="'vienen de páginas que ' + (FUENTE_BACKLINKS[informe.backlinks.fuente] || informe.backlinks.fuente) + ' marca como spam. Google suele ignorar este tipo de enlaces, así que no se cuentan como autoridad: la que llega de verdad es la de los ' + fmt.num(informe.backlinks.backlinks - informe.backlinks.spam) + ' restantes.'"></span></li>
+                  <li x-show="informe.backlinks.a_error" class="sev-error"
+                      x-text="(n => fmt.num(n) + (n === 1 ? ' página con enlaces de otros sitios da error' : ' páginas con enlaces de otros sitios dan error'))(informe.backlinks.a_error) + ': redirigirlas a la página más parecida recupera esa autoridad.'"></li>
+                  <li x-show="informe.backlinks.perdida > 0"
+                      x-text="fmt.pct(100 * informe.backlinks.perdida, 0) + ' de la autoridad que entra de fuera cae en páginas con error o sin respuesta.'"></li>
+                </ul>
+                <template x-if="(informe.backlinks.paginas || []).length">
+                  <div>
+                    <p class="text-sm">Las páginas que más enlaces reciben:</p>
+                    <ul class="text-sm">
+                      <template x-for="p in informe.backlinks.paginas" :key="p.url">
+                        <li><span class="informe-url" x-text="p.url"></span>
+                          <span class="text-dim" x-text="' · ' + fmt.num(p.backlinks) + (p.spam ? ', ' + fmt.num(p.spam) + ' de ellos spam' : '')"></span></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+              </section>
+            </template>
+
             <!-- Buscadores de IA (decisiones 129, 137 y 140) -->
             <template x-if="informe.ia">
               <section data-testid="informe-ia">
@@ -6789,7 +6822,7 @@
                   <!-- Con los backlinks del cliente (decision 212) -->
                   <template x-if="urlDetail.pagerank_externo_score != null">
                     <div class="detail-row"><span class="detail-label" data-tip="El mismo PageRank, con el salto puesto donde entra la autoridad de otros sitios según el CSV de backlinks del cliente. Dice por dónde entra la autoridad real; el de arriba, cómo la reparte el sitio.">PageRank desde fuera (0-100)</span>
-                      <span class="detail-value" x-text="urlDetail.pagerank_externo_score + (urlDetail.backlinks_externos ? ' · ' + fmt.n(urlDetail.backlinks_externos, 'backlink', 'backlinks') : ' · sin backlinks propios')"></span></div>
+                      <span class="detail-value" x-text="urlDetail.pagerank_externo_score + (urlDetail.backlinks_externos ? ' · ' + fmt.n(urlDetail.backlinks_externos, 'backlink', 'backlinks') + (urlDetail.backlinks_spam ? ' (' + fmt.num(urlDetail.backlinks_spam) + ' spam, no suman)' : '') : ' · sin backlinks propios')"></span></div>
                   </template>
                   <div class="detail-row"><span class="detail-label" data-tip="La escala 0-10 de siempre, aquí solo por compatibilidad con los informes ya entregados.">PageRank (0-10, antiguo)</span><span class="detail-value text-dim" x-text="fmt.dec(urlDetail.pagerank, 2)"></span></div>
                   <div class="detail-row"><span class="detail-label">Primera vez</span><span class="detail-value" x-text="fmt.date(urlDetail.first_seen_at)"></span></div>
