@@ -114,6 +114,24 @@ def test_inspeccionar_guarda_la_ultima_y_un_error_por_url(s, monkeypatch):
     assert not GI.toca(e, AHORA + timedelta(hours=2)) and GI.toca(e, AHORA + timedelta(days=1))
 
 
+def test_lo_que_google_no_sabe_se_guarda_vacio(s):
+    # crawledAs de una URL sin rastrear: 31 caracteres que no caben en la
+    # columna de 16 (Postgres tiraba la tanda; SQLite no mide, por eso se
+    # mira el valor y no el error).
+    c, j = _montar(s)
+    _url(s, j, "/nueva", imp=0)
+    s.commit()
+    falso = Falso({"nueva": {"verdict": "VERDICT_UNSPECIFIED", "coverageState": "URL desconocida para Google",
+                             "crawledAs": "CRAWLING_USER_AGENT_UNSPECIFIED",
+                             "indexingState": "INDEXING_STATE_UNSPECIFIED",
+                             "robotsTxtState": "ROBOTS_TXT_STATE_UNSPECIFIED",
+                             "pageFetchState": "PAGE_FETCH_STATE_UNSPECIFIED"}})
+    assert GI.inspeccionar(s, c, INTEG, ahora=AHORA, consultor=falso) == 1
+    f = s.query(GscInspeccion).one()
+    assert (f.verdict, f.indexacion, f.robots, f.descarga, f.rastreada_como) == (None,) * 5
+    assert f.cobertura == "URL desconocida para Google"
+
+
 def test_sin_permiso_lo_dice_y_no_guarda_basura(s):
     c, j = _montar(s)
     _url(s, j, "/a", imp=10)
