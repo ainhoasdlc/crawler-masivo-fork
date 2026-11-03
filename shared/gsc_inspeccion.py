@@ -103,6 +103,14 @@ def candidatas(db, cliente_id, propiedad: str, limite: int, ahora: datetime) -> 
     return salida
 
 
+def _enum(v: Any) -> Any:
+    """Google rellena con `*_UNSPECIFIED` lo que no sabe: es «sin dato». Visto
+    en produccion: `crawledAs` de una URL que Google aun no ha rastreado es
+    `CRAWLING_USER_AGENT_UNSPECIFIED`, 31 caracteres en una columna de 16, y
+    tiraba la tanda entera (mobilitycentro, 3-nov-2026)."""
+    return None if isinstance(v, str) and v.endswith("_UNSPECIFIED") else v
+
+
 def _a_fila(url: str, r: dict[str, Any]) -> dict[str, Any]:
     i = ((r or {}).get("inspectionResult") or {}).get("indexStatusResult") or {}
     ultimo = i.get("lastCrawlTime")
@@ -110,11 +118,11 @@ def _a_fila(url: str, r: dict[str, Any]) -> dict[str, Any]:
         ultimo = datetime.fromisoformat(ultimo.replace("Z", "+00:00")) if ultimo else None
     except ValueError:
         ultimo = None
-    return {"verdict": i.get("verdict"), "cobertura": i.get("coverageState"),
-            "indexacion": i.get("indexingState"), "robots": i.get("robotsTxtState"),
-            "descarga": i.get("pageFetchState"), "canonical_google": i.get("googleCanonical"),
+    return {"verdict": _enum(i.get("verdict")), "cobertura": i.get("coverageState"),
+            "indexacion": _enum(i.get("indexingState")), "robots": _enum(i.get("robotsTxtState")),
+            "descarga": _enum(i.get("pageFetchState")), "canonical_google": i.get("googleCanonical"),
             "canonical_usuario": i.get("userCanonical"), "ultimo_rastreo": ultimo,
-            "rastreada_como": i.get("crawledAs"), "error": None}
+            "rastreada_como": _enum(i.get("crawledAs")), "error": None}
 
 
 def inspeccionar(db, cliente, integracion: dict, *, ahora: datetime | None = None,
