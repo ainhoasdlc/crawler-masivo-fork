@@ -16,7 +16,9 @@ Con los backlinks del CSV del cliente ya cruzados con el censo (lo hace
   al comparar un censo analizado antes de subir el CSV con uno de despues.
 
 Lo que solo recibe backlinks que el proveedor marca como spam no se avisa:
-redirigir un 404 al que solo enlaza una red de spam no recupera nada.
+redirigir un 404 al que solo enlaza una red de spam no recupera nada. Los
+nofollow si: no traen autoridad, pero si visitas, y una migracion tiene que
+inventariar esa pagina.
 
 Un backlink que llega a una 301 no se avisa: la arista de redireccion lo pasa
 a su destino, y eso es lo que tiene que pasar. Best-effort entero (decision
@@ -36,7 +38,8 @@ HUERFANAS = ("orphan_page", "sitemap_orphan", "huerfana_con_trafico")
 
 
 def _detalle(d) -> dict:
-    return {"backlinks": d["backlinks"], "spam": d.get("spam", 0), "dominios": d["dominios"],
+    return {"backlinks": d["backlinks"], "nofollow": d.get("nofollow", 0), "spam": d.get("spam", 0),
+            "dominios": d["dominios"],
             "autoridad": round(d["aportacion"], 4), "origenes": d["origenes"]}
 
 

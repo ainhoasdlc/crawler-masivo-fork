@@ -23,7 +23,7 @@ SEMRUSH = ("Page ascore,Source title,Source url,Target url,Anchor,External links
            "Sponsored,Ugc,First seen,Last seen,New link,Lost link\n"
            "45,Uno,https://uno.com/a,https://x.com/,inicio,4,10,false,false,false,2026-01-01,2026-10-01,false,false\n"
            "30,Dos,https://dos.com/b,https://x.com/b,b,0,3,true,false,false,2026-01-01,2026-10-01,false,false\n")
-# «Is spam» de Ahrefs: el tercero es spam y nofollow, y se descarta como nofollow.
+# «Is spam» de Ahrefs: el cuarto es spam y nofollow.
 AHREFS_SPAM = ("Referring page URL\tUR\tExternal links\tTarget URL\tNofollow\tIs spam\n"
                "https://bueno.com/a\t30\t2\thttps://x.com/\tfalse\tfalse\n"
                "https://red.shop/1\t10\t0\thttps://x.com/\tfalse\ttrue\n"
@@ -37,9 +37,10 @@ MAJESTIC = ("Source URL,Target URL,Anchor Text,SourceCitationFlow,SourceTrustFlo
 def test_ahrefs_en_utf16_con_tabuladores():
     lec = B.leer_csv(AHREFS.encode("utf-16"))
     assert lec.fuente == "ahrefs" and lec.leidas == 6
-    assert (lec.descartadas_nofollow, lec.descartadas_perdidas) == (3, 1), "UGC y Sponsored van aparte"
-    urls = [f["url_to"] for f in lec.filas]
-    assert urls == ["https://www.x.com/Producto/", "https://x.com/a%C3%B1o/"]
+    assert (lec.nofollow, lec.descartadas_perdidas) == (3, 1), "UGC y Sponsored tambien son nofollow"
+    assert [(f["url_to"], f["nofollow"]) for f in lec.filas] == [
+        ("https://www.x.com/Producto/", False), ("https://x.com/viejo", True), ("https://x.com/a%C3%B1o/", False),
+        ("https://x.com/", True), ("https://x.com/", True)]
     # La aportacion es la de cada backlink: UR del origen / (externos + 1)
     assert lec.filas[0]["aportacion"] == pytest.approx(30 / 10)
     assert lec.filas[0]["dominio_from"] == "blog-a.com"
@@ -47,24 +48,25 @@ def test_ahrefs_en_utf16_con_tabuladores():
 
 def test_semrush_y_majestic():
     lec = B.leer_csv(SEMRUSH.encode())
-    assert lec.fuente == "semrush" and [f["url_to"] for f in lec.filas] == ["https://x.com/"]
+    assert lec.fuente == "semrush" and [f["nofollow"] for f in lec.filas] == [False, True]
     assert lec.filas[0]["aportacion"] == pytest.approx(45 / 5)
     lec = B.leer_csv(MAJESTIC.encode("utf-8-sig"))
     assert lec.fuente == "majestic" and lec.filas[0]["aportacion"] == pytest.approx(22.0)
-    assert len(lec.filas) == 1 and lec.descartadas_nofollow == 1, "el «+» de Majestic es nofollow"
+    assert [f["nofollow"] for f in lec.filas] == [False, True], "el «+» de Majestic es nofollow"
 
 
 def test_el_spam_de_ahrefs_se_guarda_y_no_aporta():
     lec = B.leer_csv(AHREFS_SPAM.encode("utf-16"))
-    assert (lec.spam, lec.descartadas_nofollow) == (2, 1)
-    assert [f["spam"] for f in lec.filas] == [False, True, True]
+    assert (lec.spam, lec.nofollow) == (3, 1)
+    assert [f["spam"] for f in lec.filas] == [False, True, True, True]
     assert lec.columnas["spam"] == "Is spam"
-    filas = [(f["url_to"], f["url_from"], f["dominio_from"], f["aportacion"], f["spam"]) for f in lec.filas]
+    filas = [(f["url_to"], f["url_from"], f["dominio_from"], f["aportacion"], f["spam"], f["nofollow"])
+             for f in lec.filas]
     c = B.cruzar(filas, [(1, "https://x.com/")])
     d = c.por_url[1]
-    assert (d["backlinks"], d["spam"]) == (2, 1), "el spam cuenta como backlink"
-    assert d["aportacion"] == pytest.approx(30 / 3) and d["origenes"] == ["https://bueno.com/a"], "y no aporta"
-    assert (c.filas, c.casadas, c.spam, c.spam_casados) == (3, 2, 2, 1)
+    assert (d["backlinks"], d["nofollow"], d["spam"]) == (3, 1, 2), "el spam y el nofollow cuentan como backlink"
+    assert d["aportacion"] == pytest.approx(30 / 3) and d["origenes"] == ["https://bueno.com/a"], "y no aportan"
+    assert (c.filas, c.casadas, c.spam, c.spam_casados, c.nofollow, c.nofollow_casados) == (4, 3, 3, 2, 1, 1)
     assert c.aportacion_total == pytest.approx(10.0)
     assert (c.no_rastreadas[0]["spam"], c.no_rastreadas[0]["aportacion"]) == (1, 0)
 
@@ -87,7 +89,7 @@ def test_se_lee_en_streaming_desde_un_fichero():
     import io
 
     lec = B.leer_csv(io.BytesIO(AHREFS.encode("utf-16")))
-    assert len(lec.filas) == 2
+    assert len(lec.filas) == 5
 
 
 def test_un_csv_sin_las_columnas_se_rechaza():
@@ -127,10 +129,10 @@ def test_el_cruce_prueba_sin_la_query_y_guarda_lo_que_no_casa():
              ("https://x.com/antigua", "https://d.com/", "d.com", 1.0)]
     c = B.cruzar(filas, urls)
     assert set(c.por_url) == {1, 2}
-    assert c.por_url[1] == {"backlinks": 1, "spam": 0, "aportacion": 2.0, "dominios": 1,
+    assert c.por_url[1] == {"backlinks": 1, "nofollow": 0, "spam": 0, "aportacion": 2.0, "dominios": 1,
                             "origenes": ["https://a.com/"]}
     assert (c.filas, c.casadas, c.parte_casada) == (5, 2, 0.4)
-    assert c.no_rastreadas[0] == {"url": "https://x.com/antigua", "backlinks": 2, "spam": 0, "aportacion": 6.0,
+    assert c.no_rastreadas[0] == {"url": "https://x.com/antigua", "backlinks": 2, "nofollow": 0, "spam": 0, "aportacion": 6.0,
                                   "dominios": 2}
 
 
@@ -178,3 +180,14 @@ def test_la_masa_colgante_no_vuelve_al_404():
     bien = prk.pagerank(5, src, dst, w, teletransporte=v, colgante=idx)
     mal = prk.pagerank(5, src, dst, w, teletransporte=v)
     assert bien[4] < mal[4]
+
+
+def test_un_nofollow_cuenta_y_se_ensena_pero_no_aporta():
+    filas = [("https://x.com/a", "https://fuerte.com/", "fuerte.com", 40.0, False, False),
+             ("https://x.com/a", "https://foro.com/", "foro.com", 90.0, False, True),
+             ("https://x.com/b", "https://foro.com/2", "foro.com", 90.0, None, True)]
+    c = B.cruzar(filas, [(1, "https://x.com/a"), (2, "https://x.com/b")])
+    assert (c.por_url[1]["backlinks"], c.por_url[1]["nofollow"]) == (2, 1)
+    assert c.por_url[1]["aportacion"] == pytest.approx(40.0) and c.aportacion_total == pytest.approx(40.0)
+    assert c.por_url[1]["origenes"] == ["https://fuerte.com/", "https://foro.com/"], "el nofollow, el ultimo"
+    assert c.por_url[2]["aportacion"] == 0 and c.por_url[2]["origenes"] == ["https://foro.com/2"]

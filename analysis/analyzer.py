@@ -4942,8 +4942,8 @@ class SEOAnalyzer:
         try:
             with self.session.begin_nested():
                 self.session.execute(text(
-                    "UPDATE urls SET pagerank_externo_score = NULL, backlinks_externos = NULL, "
-                    "backlinks_spam = NULL, autoridad_externa = NULL "
+                    "UPDATE urls SET pagerank_externo_score = NULL, backlinks_externos = NULL, backlinks_nofollow = NULL, "
+                    "backlinks_spam = NULL, backlinks_spam_pct = NULL, autoridad_externa = NULL "
                     "WHERE job_id = :jid AND backlinks_externos IS NOT NULL"
                 ), {"jid": self.job_id})
                 imp = ultima_importacion(self.session, self._cliente_id)
@@ -4990,21 +4990,24 @@ class SEOAnalyzer:
         self.session.execute(text("DROP TABLE IF EXISTS pr_ext_tmp"))
         self.session.execute(text(
             "CREATE TEMP TABLE pr_ext_tmp (id BIGINT PRIMARY KEY, score INTEGER, "
-            "backlinks INTEGER, spam INTEGER, autoridad DOUBLE PRECISION)"))
+            "backlinks INTEGER, nofollow INTEGER, spam INTEGER, spam_pct DOUBLE PRECISION, "
+            "autoridad DOUBLE PRECISION)"))
         filas = []
         for i, uid in enumerate(ids_ordenados):
             d = cruce.por_url.get(int(uid))
+            backlinks, nofollow, spam = (d["backlinks"], d.get("nofollow", 0), d.get("spam", 0)) if d else (0, 0, 0)
             filas.append({"id": int(uid), "score": int(puntuacion[i]),
-                          "backlinks": d["backlinks"] if d else 0,
-                          "spam": d.get("spam", 0) if d else 0,
+                          "backlinks": backlinks - nofollow, "nofollow": nofollow, "spam": spam,
+                          "spam_pct": round(100 * spam / backlinks, 1) if backlinks else None,
                           "autoridad": round(d["aportacion"], 6) if d else 0.0})
         for i in range(0, len(filas), 10_000):
             self.session.execute(text(
-                "INSERT INTO pr_ext_tmp (id, score, backlinks, spam, autoridad) "
-                "VALUES (:id, :score, :backlinks, :spam, :autoridad)"), filas[i:i + 10_000])
+                "INSERT INTO pr_ext_tmp (id, score, backlinks, nofollow, spam, spam_pct, autoridad) "
+                "VALUES (:id, :score, :backlinks, :nofollow, :spam, :spam_pct, :autoridad)"), filas[i:i + 10_000])
         self.session.execute(text(
             "UPDATE urls SET pagerank_externo_score = t.score, backlinks_externos = t.backlinks, "
-            "backlinks_spam = t.spam, autoridad_externa = t.autoridad "
+            "backlinks_nofollow = t.nofollow, "
+            "backlinks_spam = t.spam, backlinks_spam_pct = t.spam_pct, autoridad_externa = t.autoridad "
             "FROM pr_ext_tmp t WHERE urls.id = t.id"))
         self.session.execute(text("DROP TABLE IF EXISTS pr_ext_tmp"))
 
@@ -5023,8 +5026,10 @@ class SEOAnalyzer:
             "fecha_dato": imp.fecha_dato.isoformat() if imp.fecha_dato else None,
             "subido": imp.created_at.isoformat() if imp.created_at else None,
             "backlinks": cruce.filas, "casados": cruce.casadas, "parte_casada": cruce.parte_casada,
-            # Lo que el proveedor marca como spam: cuenta en `backlinks`, no aporta.
+            # Lo que el proveedor marca como spam y los nofollow: cuentan en
+            # `backlinks`, no aportan.
             "spam": cruce.spam, "spam_casados": cruce.spam_casados,
+            "nofollow": cruce.nofollow, "nofollow_casados": cruce.nofollow_casados,
             "paginas_con_backlinks": len(cruce.por_url), "beta": beta,
             "entra_en": por_categoria, "reparto": reparto,
             "desperdiciado": prk.desperdiciado(reparto),
