@@ -4606,7 +4606,8 @@
                 <p class="text-sm" x-text="sh.cifras"></p>
                 <p class="text-sm text-dim" x-show="!sh.hallazgos">Ningún patrón de Shopify con problema en este rastreo.</p>
                 <p class="text-sm" x-show="sh.hallazgos">
-                  <span x-text="fmt.n(sh.hallazgos, 'hallazgo propio de Shopify', 'hallazgos propios de Shopify') + ' en la pestaña '"></span>
+                  <span x-text="fmt.n(sh.hallazgos, 'patrón propio de Shopify', 'patrones propios de Shopify')
+                    + (sh.paginas ? ' en ' + fmt.n(sh.paginas, 'página', 'páginas') : '') + ', en la pestaña '"></span>
                   <a href="#" @click.prevent="openExplorer({ tab: 'a_shopify' })">Shopify</a> del explorador de incidencias.</p>
               </div>
             </template>

@@ -561,11 +561,14 @@ const fmt = {
       } else if (['ejemplos', 'paginas_ejemplo', 'ejemplos_origen'].includes(k) && Array.isArray(v)) {
         const e = v[0];
         if (e == null) continue;
-        const txt = typeof e === 'string' ? corta(e)
+        let txt = typeof e === 'string' ? corta(e)
           : e.url ? corta(e.url) + (e.status_code ? ` (${e.status_code})` : '')
           : (e.destino ? corta(e.destino) : (e.href || ''));
-        if (txt) partes.push('p. ej. ' + (txt.length > 70 ? txt.slice(0, 70) + '…' : txt));
-      } else if (['canonical', 'href', 'image_url', 'target', 'redirect_url', 'destino', 'href_ejemplo', 'destino_ejemplo'].includes(k)) {
+        if (txt.length > 70) txt = txt.slice(0, 70) + '…';
+        // Avisos de Shopify: a que URL deberia ir ese enlace.
+        if (txt && e && e.enlazar_a) txt += ' → ' + corta(e.enlazar_a);
+        if (txt) partes.push('p. ej. ' + txt);
+      } else if (['canonical', 'href', 'image_url', 'target', 'redirect_url', 'destino', 'href_ejemplo', 'destino_ejemplo', 'enlazar_a'].includes(k)) {
         partes.push(etiq(k) + ' ' + (String(v).length > 70 ? String(v).slice(0, 70) + '…' : v));
       } else if (k === 'canonical_host') {
         if (!d.canonical) partes.push('a ' + v);
@@ -585,7 +588,7 @@ const fmt = {
       } else if (typeof v === 'object') {
         continue;
       } else if (typeof v === 'boolean') {
-        if (v) partes.pushetiq(k);
+        if (v) partes.push(etiq(k));
       } else {
         partes.push(`${etiq(k)} ${typeof v === 'number' ? fmt.num(v) : v}`);
       }
@@ -4753,8 +4756,9 @@ function app() {
         if (d.alcance === 'host' || (d.host && d.paginas_del_host != null)) g.deServidor++;
         else if (d.alcance === 'plantilla' || pa > 1) g.dePlantilla++;
         g.paginasAfectadas = Math.max(g.paginasAfectadas, pa);
-        const txt = this.detalleEnFicha(d, propia);
-        if (txt) g.detalles.set(txt, (g.detalles.get(txt) || 0) + 1);
+        for (const txt of (this.enlacesEnFicha(d) || [this.detalleEnFicha(d, propia)])) {
+          if (txt) g.detalles.set(txt, (g.detalles.get(txt) || 0) + 1);
+        }
       }
       return [...por.values()].map(g => ({
         ...g,
@@ -4765,6 +4769,27 @@ function app() {
           : g.dePlantilla + g.deServidor ? 'parte' : null,
         detalles: [...g.detalles].map(([texto, n]) => ({ texto, n })),
       })).sort((a, b) => (ORDEN[a.severity] ?? 3) - (ORDEN[b.severity] ?? 3) || b.n - a.n);
+    },
+
+    // Avisos de enlaces que saben a que URL deberian ir (los de Shopify): una
+    // linea por enlace de esta pagina, «este destino → la URL buena», en vez
+    // de un solo «p. ej.». Si es de plantilla, el destino y desde donde.
+    // null si el aviso no es de ese tipo.
+    enlacesEnFicha(d) {
+      if (!d || typeof d !== 'object') return null;
+      const corta = u => String(u).replace(/^https?:\/\/[^/]+/, '') || '/';
+      const flecha = (url, buena) => corta(url) + (buena ? ' → enlazar a ' + corta(buena) : '');
+      if (d.alcance === 'plantilla' && d.destino && 'enlazar_a' in d) {
+        const desde = Array.isArray(d.paginas_ejemplo) ? d.paginas_ejemplo : [];
+        return [fmt.n(d.paginas_que_enlazan, 'página enlaza a ', 'páginas enlazan a ') + flecha(d.destino, d.enlazar_a),
+                ...desde.slice(0, 3).map(u => 'p. ej. desde ' + corta(u))];
+      }
+      const ej = Array.isArray(d.ejemplos) ? d.ejemplos.filter(e => e && e.url && 'enlazar_a' in e) : [];
+      if (!ej.length) return null;
+      const lineas = ej.map(e => 'enlaza a ' + flecha(e.url, e.enlazar_a));
+      const resto = (+d.destinos || 0) - ej.length;
+      if (resto > 0) lineas.push(fmt.n(resto, 'destino más', 'destinos más'));
+      return lineas;
     },
 
     // El detalle de una incidencia en la ficha de SU url: sin lo que ya dice
@@ -7944,7 +7969,10 @@ function resumenShopify(job) {
   return {
     evidencia: ev.join(' · '),
     cifras: cifras.length ? 'En el rastreo: ' + cifras.join(', ') + '.' : '',
-    hallazgos: Object.values(emitidos).reduce((s, n) => s + (Number(n) || 0), 0),
+    // Patrones (tipos con algun aviso) y paginas que llevan alguno: desde que
+    // cada aviso va en su pagina, sumar los emitidos ya no cuenta patrones.
+    hallazgos: Object.values(emitidos).filter(n => Number(n) > 0).length,
+    paginas: Number(a.paginas) || 0,
   };
 }
 

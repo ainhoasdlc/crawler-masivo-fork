@@ -1,6 +1,7 @@
 """Avisos de Shopify (analysis/avisos_de_shopify.py), EJECUTADOS contra SQLite
-(decision 74) con una tienda de juguete: se detecta por el robots.txt, y cada
-patron sale una vez por host con sus cuentas y ejemplos.
+(decision 74) con una tienda de juguete: se detecta por el robots.txt; los
+avisos de enlaces van en la pagina que los lleva (o una vez, si son de
+plantilla) y los del censo en cada URL afectada.
 
 Sin Shopify no sale nada, y una coleccion sin productos solo se afirma si otra
 coleccion del censo si los pinta en el HTML (si no, la parrilla iria por
@@ -95,42 +96,86 @@ def _avisar(s, j):
     return r
 
 
-def test_cada_patron_sale_una_vez_por_host():
+def _id(s, j, ruta):
+    return s.execute(select(Url.id).where(Url.job_id == j.id, Url.url == f"https://x.com{ruta}")).scalar()
+
+
+def test_los_de_enlaces_van_en_la_pagina_que_los_lleva():
+    """En la portada solo salia el aviso agrupado y en sus enlaces no estaba
+    ninguno: ahora cada pagina lleva el suyo, con sus destinos y a donde
+    deberian ir."""
     s, j = _montar()
     u = _tienda(s, j)
     r = _avisar(s, j)
     assert r["productos"] == 2 and r["colecciones"] == 3 and r["colecciones_con_productos"] == 1
 
     (en_col,) = _issues(s, j, "shopify_enlace_a_producto_en_coleccion")
-    assert en_col.severity == "warning" and en_col.url_id == u["home"].id, "anclado en la raiz del host"
+    assert en_col.severity == "warning" and en_col.url_id == u["camisetas"].id, "en la coleccion que enlaza"
     d = en_col.details
-    assert (d["enlaces"], d["paginas_origen"], d["destinos"], d["en_el_censo"]) == (3, 1, 2, 0)
-    assert d["ejemplos"][0]["desde"] == "https://x.com/collections/camisetas"
+    assert (d["alcance"], d["enlaces"], d["destinos"]) == ("pagina", 3, 2)
+    assert d["ejemplos"] == [
+        {"url": "https://x.com/collections/camisetas/products/camiseta-azul",
+         "enlazar_a": "https://x.com/products/camiseta-azul"},
+        {"url": "https://x.com/collections/camisetas/products/camiseta-roja",
+         "enlazar_a": "https://x.com/products/camiseta-roja"}]
 
     (var,) = _issues(s, j, "shopify_enlace_a_variante")
-    assert var.severity == "info" and var.details["enlaces"] == 1, "el nofollow no cuenta"
+    assert var.url_id == u["home"].id and var.severity == "info"
+    assert var.details["enlaces"] == 1, "el nofollow no cuenta"
+    assert var.details["ejemplos"][0]["enlazar_a"] == "https://x.com/products/camiseta-azul"
     (p1,) = _issues(s, j, "shopify_enlace_a_pagina_1")
-    assert [e["url"] for e in p1.details["ejemplos"]] == ["https://x.com/collections/camisetas?page=1"]
+    assert p1.url_id == u["camisetas"].id
+    assert p1.details["ejemplos"] == [{"url": "https://x.com/collections/camisetas?page=1",
+                                       "enlazar_a": "https://x.com/collections/camisetas"}]
     (apps,) = _issues(s, j, "shopify_parametros_de_apps")
-    assert apps.severity == "warning"
+    assert apps.severity == "warning" and apps.url_id == u["home"].id
+    assert apps.details["ejemplos"][0]["enlazar_a"] == "https://x.com/products/camiseta-roja"
     (barra,) = _issues(s, j, "shopify_enlace_con_barra_final")
-    assert barra.details["ejemplos"][0]["url"] == "https://x.com/pages/contacto/"
-    (tec,) = _issues(s, j, "shopify_url_tecnica")
-    assert tec.details["ejemplos"] == ["https://x.com/products/camiseta-roja.js.js"]
+    assert barra.details["ejemplos"] == [{"url": "https://x.com/pages/contacto/",
+                                          "enlazar_a": "https://x.com/pages/contacto"}]
 
-    (vacia,) = _issues(s, j, "shopify_coleccion_vacia")
-    assert vacia.details["ejemplos"] == ["https://x.com/collections/black-friday-1",
-                                         "https://x.com/collections/ver-todo-camisetas"]
+
+def test_los_del_censo_van_en_cada_url_afectada():
+    s, j = _montar()
+    _tienda(s, j)
+    _avisar(s, j)
+    (tec,) = _issues(s, j, "shopify_url_tecnica")
+    assert tec.url_id == _id(s, j, "/products/camiseta-roja.js.js")
+    vacias = _issues(s, j, "shopify_coleccion_vacia")
+    assert sorted(v.url_id for v in vacias) == sorted(
+        [_id(s, j, "/collections/black-friday-1"), _id(s, j, "/collections/ver-todo-camisetas")])
     (todo,) = _issues(s, j, "shopify_coleccion_ver_todo")
-    assert todo.details["ejemplos"] == ["https://x.com/collections/ver-todo-camisetas"]
+    assert todo.url_id == _id(s, j, "/collections/ver-todo-camisetas")
     (can,) = _issues(s, j, "shopify_canonical_producto_a_coleccion")
-    assert can.severity == "error"
-    assert can.details["ejemplos"] == [{"url": "https://x.com/products/camiseta-roja",
-                                        "destino": "https://x.com/collections/camisetas"}]
+    assert can.severity == "error" and can.url_id == _id(s, j, "/products/camiseta-roja")
+    assert can.details["canonical"] == "https://x.com/collections/camisetas"
 
     sh = s.get(Job, j.id).adapters["shopify"]
     assert sh["detectado"] and sh["evidencia"] == ["robots_txt"]
-    assert sum(sh["analisis"]["emitidos"].values()) == 9
+    assert sum(sh["analisis"]["emitidos"].values()) == 10
+    assert sh["analisis"]["paginas"] == 6
+
+
+def test_el_mismo_destino_desde_muchas_paginas_es_de_plantilla():
+    """Un bloque fijo del tema (10 paginas o mas al mismo destino) se avisa una
+    vez y no en cada pagina; lo que cada pagina enlaza aparte, si."""
+    s, j = _montar()
+    paginas = [_url(s, j, f"/blogs/noticias/post-{n:02d}") for n in range(10)]
+    for p in paginas:
+        _enlace(s, j, p, "/collections/camisetas/products/camiseta-azul")
+    _enlace(s, j, paginas[3], "/collections/camisetas/products/camiseta-roja")
+    s.commit()
+    _avisar(s, j)
+    avisos = _issues(s, j, "shopify_enlace_a_producto_en_coleccion")
+    plantilla = [a for a in avisos if a.details["alcance"] == "plantilla"]
+    pagina = [a for a in avisos if a.details["alcance"] == "pagina"]
+    assert len(plantilla) == 1 and len(pagina) == 1
+    d = plantilla[0].details
+    assert plantilla[0].url_id == paginas[0].id, "sin rastrear, en la pagina de URL menor que lo enlaza"
+    assert (d["paginas_que_enlazan"], d["enlazar_a"]) == (10, "https://x.com/products/camiseta-azul")
+    assert pagina[0].url_id == paginas[3].id
+    assert [e["url"] for e in pagina[0].details["ejemplos"]] == [
+        "https://x.com/collections/camisetas/products/camiseta-roja"]
 
 
 def test_sin_shopify_no_sale_nada():
