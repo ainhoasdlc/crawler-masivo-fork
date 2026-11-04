@@ -7464,7 +7464,7 @@ const EXP_TABS = [
     columns: ['url','status_code','googlebot_visitas','pagerank_score','inlinks_count','indexable'] },
   // Backlinks del CSV del cliente (decision 212).
   { key: 'a_backlinks', label: 'Backlinks', icon: 'external-link', filter: { is_internal: true }, ambito: ['backlinks_a_error','backlinks_a_noindex','backlinks_a_bloqueada_robots'],
-    columns: ['url','status_code','backlinks_externos','backlinks_nofollow','backlinks_spam','backlinks_spam_pct','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
+    columns: ['url','status_code','backlinks_externos','backlinks_nofollow','backlinks_spam_pct','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],
     columns: ['url','status_code','rel_next','rel_prev','canonical_href','indexable','inlinks_count'] },
