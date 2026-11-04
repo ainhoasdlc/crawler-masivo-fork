@@ -178,6 +178,92 @@ def test_el_mismo_destino_desde_muchas_paginas_es_de_plantilla():
         "https://x.com/collections/camisetas/products/camiseta-roja"]
 
 
+ROBOTS_CON_RECOMENDACIONES = ROBOTS_SHOPIFY.replace(
+    "Disallow: /checkouts/\n",
+    "Disallow: /checkouts/\nDisallow: /recommendations/products\nDisallow: /*/recommendations/products\n")
+
+
+def _recomendado(handle, rec, ref, prefijo=""):
+    """Enlace del carrusel como lo pinta Shopify: `pr_rec_pid` es el producto
+    enlazado y `pr_ref_pid` el de la ficha donde se pinto el carrusel."""
+    return (f"{prefijo}/products/{handle}?pr_prod_strat=e5_desc&pr_rec_id=a1&pr_rec_pid={rec}"
+            f"&pr_ref_pid={ref}&pr_seq=uniform")
+
+
+def _fichas_con_carrusel(s, j, prefijo=""):
+    """Dos fichas que se recomiendan una a otra (ids 111 y 222) y un post que
+    pega a mano un enlace copiado del carrusel de la ficha 111."""
+    azul = _url(s, j, f"{prefijo}/products/camiseta-azul")
+    roja = _url(s, j, f"{prefijo}/products/camiseta-roja")
+    post = _url(s, j, "/blogs/noticias/rebajas")
+    _enlace(s, j, azul, _recomendado("camiseta-roja", 222, 111, prefijo), veces=2)
+    _enlace(s, j, roja, _recomendado("camiseta-azul", 111, 222, prefijo), veces=2)
+    _enlace(s, j, post, _recomendado("camiseta-roja", 222, 111))
+    s.commit()
+    return {"azul": azul, "roja": roja, "post": post}
+
+
+def _apps(s, j):
+    return {a.url_id: a for a in _issues(s, j, "shopify_parametros_de_apps")}
+
+
+def test_los_del_carrusel_bloqueado_para_googlebot_bajan_a_info_y_dicen_la_regla():
+    s, j = _montar(robots=ROBOTS_CON_RECOMENDACIONES)
+    u = _fichas_con_carrusel(s, j)
+    r = _avisar(s, j)
+    apps = _apps(s, j)
+    a = apps[u["azul"].id]
+    assert a.severity == "info"
+    assert {k: a.details[k] for k in ("del_carrusel", "carga_desde", "solo_con_javascript",
+                                      "bloqueada_para_googlebot", "regla_robots")} == {
+        "del_carrusel": 2, "carga_desde": "/recommendations/products", "solo_con_javascript": True,
+        "bloqueada_para_googlebot": True, "regla_robots": "Disallow: /recommendations/products"}
+    assert apps[u["roja"].id].severity == "info"
+    assert r["carrusel_solo_js"] == 2
+
+
+def test_un_enlace_del_carrusel_pegado_en_un_post_sigue_siendo_aviso():
+    """Su `pr_ref_pid` (111) no es el id de la pagina que lo lleva: esta en el
+    HTML del post y Googlebot si lo ve."""
+    s, j = _montar(robots=ROBOTS_CON_RECOMENDACIONES)
+    u = _fichas_con_carrusel(s, j)
+    _avisar(s, j)
+    p = _apps(s, j)[u["post"].id]
+    assert p.severity == "warning"
+    assert "del_carrusel" not in p.details and "bloqueada_para_googlebot" not in p.details
+
+
+def test_con_prefijo_de_idioma_se_evalua_su_ruta():
+    s, j = _montar(robots=ROBOTS_CON_RECOMENDACIONES)
+    u = _fichas_con_carrusel(s, j, prefijo="/en-eu")
+    _avisar(s, j)
+    d = _apps(s, j)[u["azul"].id].details
+    assert d["carga_desde"] == "/en-eu/recommendations/products"
+    assert d["regla_robots"] == "Disallow: /*/recommendations/products"
+
+
+def test_si_el_robots_deja_pedir_el_carrusel_sigue_siendo_aviso():
+    s, j = _montar()
+    u = _fichas_con_carrusel(s, j)
+    _avisar(s, j)
+    a = _apps(s, j)[u["azul"].id]
+    assert a.severity == "warning"
+    assert a.details["solo_con_javascript"] is True and a.details["bloqueada_para_googlebot"] is False
+    assert "regla_robots" not in a.details
+
+
+def test_sin_el_id_de_la_ficha_no_se_afirma_que_sea_del_carrusel():
+    """Nadie enlaza a la ficha con `pr_rec_pid`: no se sabe su id."""
+    s, j = _montar(robots=ROBOTS_CON_RECOMENDACIONES)
+    azul = _url(s, j, "/products/camiseta-azul")
+    _url(s, j, "/products/camiseta-roja")
+    _enlace(s, j, azul, _recomendado("camiseta-roja", 222, 111))
+    s.commit()
+    _avisar(s, j)
+    a = _apps(s, j)[azul.id]
+    assert a.severity == "warning" and "del_carrusel" not in a.details
+
+
 def test_sin_shopify_no_sale_nada():
     s, j = _montar(robots="User-agent: *\nDisallow: /wp-admin/\n")
     _tienda(s, j)

@@ -743,9 +743,9 @@ const ISSUE_INFO = {
     arreglo: 'En el fragmento de paginación, enlazar la página 1 a la colección limpia (collection.url). Las páginas 2 y siguientes se quedan como están, indexables y con canonical propio.',
   },
   'shopify_parametros_de_apps': {
-    que: 'Enlaces internos con parámetros de apps: el carrusel de recomendaciones (pr_prod_strat, pr_rec_id, pr_seq…) o la búsqueda predictiva (_pos, _sid, _ss, _atid), que aparece cuando alguien copia la URL desde el buscador de la tienda y la pega en un post. Sale en la página que los lleva, con cada destino y la URL limpia. Las recomendaciones se cargan por JavaScript: sin rastreo con render salen menos de las que hay.',
-    google: 'Tienen canonical a la ficha limpia, pero el enlace interno apunta a la parametrizada: Google las rastrea y acaba indexando parte de ellas.',
-    arreglo: 'Si salen en posts o páginas, cambiar cada enlace por la URL limpia que se indica. Si salen del carrusel de recomendaciones, arreglar el origen en el tema: enlazar a /products/{{ product.handle }}. Si ya están indexadas, no bloquearlas todavía en robots.txt: primero que Google vea el canonical, después bloquear. Nunca noindex por JavaScript.',
+    que: 'Enlaces internos con parámetros de apps: el carrusel de recomendaciones (pr_prod_strat, pr_rec_id, pr_seq…) o la búsqueda predictiva (_pos, _sid, _ss, _atid), que aparece cuando alguien copia la URL desde el buscador de la tienda y la pega en un post. Sale en la página que los lleva, con cada destino y la URL limpia. Las recomendaciones se cargan por JavaScript: sin rastreo con render no salen. En los detalles, cuántos enlaces son del carrusel de la propia ficha (su pr_ref_pid es el id de esa ficha; los demás se pegaron a mano), desde qué ruta se cargan y si el robots.txt deja a Googlebot pedirla, con la línea que lo decide.',
+    google: 'Tienen canonical a la ficha limpia, pero el enlace interno apunta a la parametrizada: si Google llega a ellas, las rastrea y puede indexar parte. Los del carrusel solo existen con JavaScript y se cargan desde /recommendations/products, que el robots.txt de Shopify bloquea de serie: lo más probable es que Googlebot no los vea al renderizar. Por eso, si todos los enlaces del aviso son del carrusel y la ruta está bloqueada, sale como informativo; los pegados en posts o páginas están en el HTML y sí los ve.',
+    arreglo: 'Si salen en posts o páginas, cambiar cada enlace por la URL limpia que se indica. Si salen del carrusel de recomendaciones, arreglar el origen en el tema: enlazar a /products/{{ product.handle }}; con la ruta bloqueada para Googlebot no corre prisa. Si el robots.txt la deja pedir (alguien quitó la regla en robots.txt.liquid), es aviso: volver a ponerla o arreglar el tema. Si ya están indexadas, no bloquearlas todavía en robots.txt: primero que Google vea el canonical, después bloquear. Nunca noindex por JavaScript.',
   },
   'shopify_url_tecnica': {
     que: 'URLs técnicas de Shopify en el rastreo o en los enlaces: .js.js (el JSON de la variante), customer_authentication (cuentas de cliente) o /web-pixels (sandbox de los píxeles). Sale en cada una que se rastreó y en las páginas que las enlazan.',
@@ -1241,6 +1241,12 @@ const DETALLE_LABEL = {
   // Avisos de enlaces (decision 106)
   paginas_que_enlazan: 'páginas que la enlazan',
   enlazar_a: 'enlazar a',
+  // Shopify P14: el carrusel de recomendaciones
+  del_carrusel: 'enlaces del carrusel',
+  carga_desde: 'cargados desde',
+  solo_con_javascript: 'solo con JavaScript',
+  bloqueada_para_googlebot: 'ruta bloqueada para Googlebot',
+  regla_robots: 'por',
   enlaces: 'enlaces',
   destinos: 'destinos',
   con_destino_interno: 'con destino interno',

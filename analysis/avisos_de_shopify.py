@@ -37,6 +37,19 @@ como los avisos de enlaces (decision 106):
 - ``shopify_parametros_de_apps`` (warning, P14): enlaces internos con los
   parametros del carrusel de recomendaciones (`pr_prod_strat`, `pr_rec_id`…)
   o de la busqueda predictiva (`_pos`, `_sid`, `_ss`, `_atid`).
+  **Los del carrusel se distinguen de los pegados a mano**, sin heuristica:
+  Shopify pone en cada enlace de recomendaciones `pr_ref_pid`, el id del
+  producto en cuya ficha se pinto el carrusel, y `pr_rec_pid`, el del producto
+  enlazado. Un enlace es del carrusel si su `pr_ref_pid` es el id de la ficha
+  que lo lleva; ese id sale del `pr_rec_pid` de cualquier enlace que apunte a
+  ella. Sin id conocido, no se afirma. El carrusel solo existe con JavaScript
+  (Shopify rellena las recomendaciones desde `/recommendations/products`, que
+  el tema pide en el navegador), y esa ruta se evalua contra el robots.txt
+  guardado para Googlebot, con el prefijo de idioma de la ficha. Si todos los
+  enlaces del aviso son del carrusel y Googlebot no puede pedir esa ruta, el
+  aviso baja a info y dice la linea que lo bloquea (`regla_robots`): lo ve un
+  rastreo con render, que no aplica el robots.txt a lo que pide el JavaScript,
+  pero lo mas probable es que Googlebot no.
 - ``shopify_url_tecnica`` (info, P15): URLs tecnicas en el censo o en los
   enlaces: `.js.js`, `customer_authentication`, `/web-pixels`.
 - ``shopify_coleccion_vacia`` (warning, P16): colecciones que responden 200 y
@@ -85,6 +98,9 @@ VER_TODO = re.compile(r"^(?:all|ver-todo.*|.*-ver-todo|ver-todos.*|todos-los-.*|
 PARAMETROS_DE_APPS = ("pr_prod_strat", "pr_rec_id", "pr_rec_pid", "pr_ref_pid", "pr_seq",
                       "_pos", "_sid", "_ss", "_atid", "cnweblinkclicked")
 TECNICAS = (".js.js", "customer_authentication", "/web-pixels")
+# Ficha con su prefijo de idioma y su handle: `/en-eu/products/x` -> (`/en-eu`, `x`).
+FICHA = re.compile(rf"^({_IDIOMA})/products/([^/.]+)/?$")
+RUTA_RECOMENDACIONES = "/recommendations/products"
 
 
 def _clave(valor: str | None) -> str | None:
@@ -199,14 +215,91 @@ def _severidad(tipo: str) -> str:
     return "info"
 
 
+class _Carrusel:
+    """Que enlaces con `pr_*` son del carrusel de recomendaciones y si
+    Googlebot puede pedir la ruta que los carga (ver el docstring del modulo)."""
+
+    def __init__(self, robots: dict[str, Any]):
+        self.robots = robots                                    # host -> fila de robots_txt
+        self.ids: dict[tuple[str, str], set[str]] = defaultdict(set)  # (host, handle) -> pr_rec_pid
+        self._bloqueo: dict[tuple[str, str], tuple[bool | None, str | None]] = {}
+
+    def anotar(self, destino: str) -> None:
+        host, ruta, query = _partes(destino)
+        ficha = FICHA.match(ruta)
+        rec = dict((k.lower(), v) for k, v in query).get("pr_rec_pid")
+        if ficha and rec:
+            self.ids[(host, ficha.group(2))].add(rec)
+
+    def de_la_ficha(self, origen: str, destino: str) -> str | None:
+        """El prefijo de idioma de la ficha `origen` si `destino` es de SU
+        carrusel; None si no lo es o no se sabe."""
+        host, ruta, _ = _partes(origen)
+        ficha = FICHA.match(ruta)
+        ref = dict((k.lower(), v) for k, v in _partes(destino)[2]).get("pr_ref_pid")
+        ids = self.ids.get((host, ficha.group(2))) if ficha else None
+        if not ref or not ids or len(ids) != 1 or ref not in ids:
+            return None
+        return ficha.group(1)
+
+    def bloqueo(self, host: str, prefijo: str) -> tuple[bool | None, str | None]:
+        """(Googlebot no puede pedir la ruta del carrusel, linea que lo decide).
+        None si el robots.txt de ese host no se leyo o no se proceso."""
+        from shared.robots_regla import estado_guardado, regla_que_decide
+        from shared.robots_txt import PROCESADO
+
+        clave = (host, prefijo)
+        if clave not in self._bloqueo:
+            fila = self.robots.get(host)
+            if fila is None or fila.cuerpo is None or estado_guardado(fila) != PROCESADO:
+                self._bloqueo[clave] = (None, None)
+            else:
+                r = regla_que_decide(fila.cuerpo, f"https://{host}{prefijo}{RUTA_RECOMENDACIONES}",
+                                     "Googlebot")
+                self._bloqueo[clave] = (r["permitida"] is False,
+                                        r["texto"] if r["permitida"] is False else None)
+        return self._bloqueo[clave]
+
+    def contexto(self, pares: list[tuple[str, str, int]]) -> tuple[dict[str, Any], str | None]:
+        """Lo que se anade al aviso para sus enlaces `(origen, destino, veces)`,
+        y la severidad si cambia (None: la del tipo)."""
+        total = sum(v for _, _, v in pares)
+        del_carrusel, donde = 0, None
+        for origen, destino, veces in pares:
+            prefijo = self.de_la_ficha(origen, destino)
+            if prefijo is not None:
+                del_carrusel += veces
+                donde = donde or (_partes(origen)[0], prefijo)
+        if not del_carrusel:
+            return {}, None
+        host, prefijo = donde
+        ctx: dict[str, Any] = {"del_carrusel": del_carrusel,
+                               "carga_desde": prefijo + RUTA_RECOMENDACIONES,
+                               "solo_con_javascript": del_carrusel == total}
+        bloqueada, linea = self.bloqueo(host, prefijo)
+        if bloqueada is not None:
+            ctx["bloqueada_para_googlebot"] = bloqueada
+        if linea:
+            ctx["regla_robots"] = linea
+        return ctx, ("info" if ctx["solo_con_javascript"] and bloqueada else None)
+
+
 def avisar(az) -> dict[str, Any] | None:
-    from shared.models import HtmlMeta, Job, Link, Url
+    from shared.models import HtmlMeta, Job, Link, RobotsTxt, Url
 
     det = detectar(az)
     if not det["detectado"]:
         return None
     job = az.session.get(Job, az.job_id)
     umbral = int(getattr(az, "enlaces_plantilla_min_paginas", 10) or 10)
+    robots: dict[str, Any] = {}
+    try:
+        with az.session.begin_nested():
+            for fila in az.session.execute(select(RobotsTxt).where(RobotsTxt.job_id == az.job_id)).scalars():
+                robots.setdefault((fila.host or "").lower(), fila)
+    except Exception:  # noqa: BLE001 -- base sin la tabla de robots.txt: no se afirma el bloqueo
+        robots = {}
+    carrusel = _Carrusel(robots)
 
     # El censo: lo que hace falta de cada URL interna.
     censo: dict[int, Any] = {}
@@ -240,6 +333,7 @@ def avisar(az) -> dict[str, Any] | None:
         if "/products/" in _partes(destino)[1]:
             con_productos.add(origen)
         veces = int(veces or 1)
+        carrusel.anotar(destino)
         for tipo in _tipos_de_enlace(destino):
             if tipo == "shopify_url_tecnica" and any(t in censo[origen].url.lower() for t in TECNICAS):
                 continue  # una URL tecnica que enlaza a otra: ya sale en el censo
@@ -250,10 +344,21 @@ def avisar(az) -> dict[str, Any] | None:
 
     resumen: dict[str, Any] = {"emitidos": defaultdict(int), "paginas": set()}
 
-    def emitir(url_id, tipo, detalle, group_key=None):
-        az._add_issue(url_id, tipo, _severidad(tipo), detalle, group_key=group_key)
+    def emitir(url_id, tipo, detalle, group_key=None, severidad=None):
+        az._add_issue(url_id, tipo, severidad or _severidad(tipo), detalle, group_key=group_key)
         resumen["emitidos"][tipo] += 1
         resumen["paginas"].add(url_id)
+
+    def con_carrusel(tipo, detalle, pares):
+        """El detalle con lo del carrusel (solo P14) y la severidad que toca."""
+        if tipo != "shopify_parametros_de_apps":
+            return detalle, None
+        ctx, severidad = carrusel.contexto(pares)
+        if severidad == "info":
+            resumen["carrusel_solo_js"] += 1
+        return {**detalle, **ctx}, severidad
+
+    resumen["carrusel_solo_js"] = 0
 
     # De plantilla: el mismo destino desde `umbral` paginas o mas. Un aviso, en
     # el destino si se rastreo o en la pagina de URL menor que lo enlaza.
@@ -262,11 +367,12 @@ def avisar(az) -> dict[str, Any] | None:
         d = por_destino[(tipo, destino)]
         origenes = sorted(censo[o].url for o in d["origenes"])
         ancla = por_url.get(destino) or por_url[origenes[0]]
-        emitir(ancla, tipo, {
+        detalle, severidad = con_carrusel(tipo, {
             "alcance": "plantilla", "host": _partes(destino)[0], "destino": destino,
             "enlazar_a": _enlazar_a(tipo, destino), "paginas_que_enlazan": len(origenes),
             "enlaces": d["enlaces"], "paginas_ejemplo": origenes[:MUESTRA]},
-            group_key=_clave(f"plantilla|{destino}"))
+            [(censo[o].url, destino, por_origen[(tipo, o)][destino]) for o in d["origenes"]])
+        emitir(ancla, tipo, detalle, group_key=_clave(f"plantilla|{destino}"), severidad=severidad)
 
     # Por pagina de origen, con los destinos que no son de plantilla.
     for (tipo, origen), destinos in sorted(por_origen.items(),
@@ -274,10 +380,12 @@ def avisar(az) -> dict[str, Any] | None:
         propios = sorted(d for d in destinos if (tipo, d) not in de_plantilla)
         if not propios:
             continue
-        emitir(origen, tipo, {
+        detalle, severidad = con_carrusel(tipo, {
             "alcance": "pagina", "host": _partes(censo[origen].url)[0],
             "enlaces": sum(destinos[d] for d in propios), "destinos": len(propios),
-            "ejemplos": [{"url": d, "enlazar_a": _enlazar_a(tipo, d)} for d in propios[:MUESTRA]]})
+            "ejemplos": [{"url": d, "enlazar_a": _enlazar_a(tipo, d)} for d in propios[:MUESTRA]]},
+            [(censo[origen].url, d, destinos[d]) for d in propios])
+        emitir(origen, tipo, detalle, severidad=severidad)
 
     # URLs tecnicas que el rastreo SI pidio: el aviso en cada una.
     for fila in sorted(censo.values(), key=lambda f: f.url):
