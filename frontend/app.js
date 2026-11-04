@@ -7196,7 +7196,9 @@ function app() {
  *   width:       suggested min width in px for the column.
  */
 const EXP_COLUMN_DEFS = {
-  url:                  { label: 'URL',              type: 'string',  sortable: true,  filterKey: 'url_contains',          width: 320, fmt: r => { try { return new URL(r.url).pathname || '/'; } catch { return r.url; } } },
+  // Ruta CON la query: sin ella, `?page=2` o `?variant=` salian como la URL
+  // limpia y el buscador parecia no filtrar (salian 436 «iguales» a las demas).
+  url:                  { label: 'URL',              type: 'string',  sortable: true,  filterKey: 'url_contains',          width: 320, fmt: r => rutaCorta(r.url) },
   status_code:          { label: 'Estado',           type: 'numeric', sortable: true,  filterKey: 'status_code', exact: true, width: 130, fmt: r => r.status_code ?? '' },
   status_text:          { label: 'Texto estado',     type: 'string',  sortable: false, filterKey: 'status_text_contains',    width: 150, fmt: r => r.status_text ?? '' },
   content_type:         { label: 'Tipo',             type: 'string',  sortable: false, filterKey: 'content_type_contains',   width: 160, fmt: r => r.content_type ? r.content_type.split(';')[0] : '' },
@@ -7282,7 +7284,7 @@ const EXP_COLUMN_DEFS = {
   // Frente al censo de la comparacion automatica (decision 71): «nueva»,
   // «200→404», «sale del índice», «título», «canonical», «palabras a→b».
   cambio:               { label: 'Cambio frente al anterior', type: 'string', sortable: false, calculada: 'cambios', width: 240, fmt: r => r.cambio ?? '' },
-  enlazada_desde:       { label: 'Enlazada desde',  type: 'string',  sortable: false, calculada: 'origenes', width: 280, fmt: r => r.enlazada_desde ? (() => { try { return new URL(r.enlazada_desde).pathname; } catch { return r.enlazada_desde; } })() : '' },
+  enlazada_desde:       { label: 'Enlazada desde',  type: 'string',  sortable: false, calculada: 'origenes', width: 280, fmt: r => r.enlazada_desde ? rutaCorta(r.enlazada_desde) : '' },
   origenes:             { label: 'Páginas que la enlazan', type: 'numeric', sortable: false, calculada: 'origenes', width: 170, fmt: r => r.origenes ?? '' },
   last_crawled_at:      { label: 'Último rastreo',  type: 'string',  sortable: true,                                        width: 170, fmt: r => fmt.date(r.last_crawled_at) },
 };

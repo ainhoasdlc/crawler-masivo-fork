@@ -298,6 +298,15 @@ def test_contiene_admite_o_y_negacion_y_varios_codigos(con_plantillas):
     assert len(_urls(api, jid, "status_code=404")) == 4
 
 
+def test_guion_bajo_y_porcentaje_se_buscan_tal_cual(con_plantillas):
+    """En LIKE `_` es «cualquier caracter» y `%` «cualquier texto»: sin
+    escaparlos, buscar `_` daba el censo entero."""
+    api, jid = con_plantillas
+    for consulta in ("search=_", "search=%25", "url_contains=_", "url_contains=%25"):
+        assert _urls(api, jid, consulta) == [], consulta
+    assert sorted(_urls(api, jid, "search=s/a")) == ["/es/hoteles/a"]
+
+
 def test_cambio_frente_al_censo_anterior(tmp_path):
     """Misma URL (mismo url_hash) en el censo de referencia: codigo, indice,
     titulo, canonical y palabras con el umbral del 20% sobre el mayor."""

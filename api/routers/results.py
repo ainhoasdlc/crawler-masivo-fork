@@ -478,7 +478,9 @@ def _clausula_contiene(col_expr, valor):
     partes = [p for p in (x.strip() for x in valor.split("|")) if p]
     if not partes:
         return None
-    contiene = or_(*[col_expr.ilike(f"%{p}%") for p in partes])
+    # `autoescape`: un `_` o un `%` escritos son ese caracter, no el comodin
+    # de LIKE (con `_` salia el censo entero, con `_pos` tambien «mariposas»).
+    contiene = or_(*[col_expr.icontains(p, autoescape=True) for p in partes])
     return or_(col_expr.is_(None), ~contiene) if negar else contiene
 
 
@@ -807,8 +809,8 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
 
     # Buscador de arriba: URL o titulo
     if search:
-        pattern = f"%{search}%"
-        q = q.filter(or_(Url.url.ilike(pattern), HtmlMeta.title.ilike(pattern)))
+        q = q.filter(or_(Url.url.icontains(search, autoescape=True),
+                         HtmlMeta.title.icontains(search, autoescape=True)))
 
     # URLs con alguna incidencia de esos tipos (lista separada por comas: las
     # vistas por ambito piden varios a la vez) y/o de esa gravedad.
