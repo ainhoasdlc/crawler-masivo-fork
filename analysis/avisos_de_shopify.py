@@ -9,8 +9,22 @@ o `/cdn/shop/`. Sin Shopify, nada.
 
 Los patrones salen de auditorias reales de tiendas Shopify (P1 a P28 del
 checklist de SEO tecnico): aqui solo los que se pueden afirmar con lo que el
-rastreo ya guarda. Todos **agrupados por host** (decisiones 36, 53, 64 y 73):
-son del tema o de la plataforma, no de una pagina suelta.
+rastreo ya guarda.
+
+**Donde se cuelga cada aviso.** Antes todos iban agrupados por host y anclados
+en la portada: en el Explorador solo salia la home, y en sus enlaces no estaba
+ninguno de los que se avisaban (venian de posts del blog o de fichas). Ahora,
+como los avisos de enlaces (decision 106):
+
+- los de **enlaces**, en la pagina que los lleva: es donde hay que editar. Uno
+  por pagina y tipo, con cuantos enlaces, sus destinos y a que URL deberian ir
+  (`enlazar_a`). Si el MISMO destino lo enlazan `enlaces_plantilla_min_paginas`
+  paginas o mas, es del tema (menu, pie, un bloque fijo): un solo aviso con
+  ``alcance: plantilla`` en el destino si se rastreo o, si no, en la pagina de
+  URL menor que lo enlaza (decision 88), y esas paginas no lo repiten;
+- los del **censo** (colecciones vacias o «ver todo», canonical de ficha a
+  coleccion, URLs tecnicas rastreadas), en cada URL afectada, no solo en la
+  primera.
 
 - ``shopify_enlace_a_producto_en_coleccion`` (warning, P4): enlaces internos a
   `/collections/<c>/products/<p>`. Shopify canonicaliza esa URL a
@@ -22,7 +36,7 @@ son del tema o de la plataforma, no de una pagina suelta.
   coleccion limpia con otra URL. Las paginas 2 y siguientes no se tocan.
 - ``shopify_parametros_de_apps`` (warning, P14): enlaces internos con los
   parametros del carrusel de recomendaciones (`pr_prod_strat`, `pr_rec_id`…)
-  o de la busqueda predictiva (`_pos`, `_sid`, `_ss`).
+  o de la busqueda predictiva (`_pos`, `_sid`, `_ss`, `_atid`).
 - ``shopify_url_tecnica`` (info, P15): URLs tecnicas en el censo o en los
   enlaces: `.js.js`, `customer_authentication`, `/web-pixels`.
 - ``shopify_coleccion_vacia`` (warning, P16): colecciones que responden 200 y
@@ -36,7 +50,7 @@ son del tema o de la plataforma, no de una pagina suelta.
 - ``shopify_enlace_con_barra_final`` (info, P1): enlaces internos a
   `/products/x/`, `/collections/x/` o `/pages/x/` con barra final.
 
-Se anclan como los avisos de sitemaps (decision 126) y el resumen va a
+El resumen (avisos por tipo y paginas con alguno) va a
 `jobs.adapters["shopify"]`.
 """
 
@@ -46,7 +60,7 @@ import logging
 import re
 from collections import defaultdict
 from typing import Any
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import func, or_, select
 
@@ -69,7 +83,7 @@ COLECCION = re.compile(rf"^{_IDIOMA}/collections/([^/.]+)/?$")
 CON_BARRA = re.compile(rf"^{_IDIOMA}/(?:products|collections|pages)/[^/]+(?:/products/[^/]+)?/$")
 VER_TODO = re.compile(r"^(?:all|ver-todo.*|.*-ver-todo|ver-todos.*|todos-los-.*|view-all.*|.*-view-all|shop-all.*)$")
 PARAMETROS_DE_APPS = ("pr_prod_strat", "pr_rec_id", "pr_rec_pid", "pr_ref_pid", "pr_seq",
-                      "_pos", "_sid", "_ss", "cnweblinkclicked")
+                      "_pos", "_sid", "_ss", "_atid", "cnweblinkclicked")
 TECNICAS = (".js.js", "customer_authentication", "/web-pixels")
 
 
@@ -133,14 +147,66 @@ def detectar(az) -> dict[str, Any]:
     return {"detectado": bool(evidencia), "evidencia": evidencia}
 
 
+def _enlazar_a(tipo: str, url: str) -> str | None:
+    """La URL a la que deberia ir ese enlace: la que Shopify da por canonica.
+    None si no hay ninguna (una URL tecnica no se enlaza)."""
+    try:
+        p = urlsplit(url)
+    except ValueError:
+        return None
+    ruta = p.path or "/"
+    query = parse_qsl(p.query, keep_blank_values=True)
+    if tipo == "shopify_enlace_a_producto_en_coleccion":
+        ruta, query = re.sub(r"/collections/[^/]+(?=/products/)", "", ruta).rstrip("/"), []
+    elif tipo == "shopify_enlace_a_variante":
+        query = []
+    elif tipo == "shopify_enlace_a_pagina_1":
+        query = [(k, v) for k, v in query if (k, v) != ("page", "1")]
+    elif tipo == "shopify_parametros_de_apps":
+        query = [(k, v) for k, v in query if k.lower() not in PARAMETROS_DE_APPS]
+    elif tipo == "shopify_enlace_con_barra_final":
+        ruta = ruta.rstrip("/") or "/"
+    else:
+        return None
+    return urlunsplit((p.scheme, p.netloc, ruta, urlencode(query), ""))
+
+
+def _tipos_de_enlace(destino: str) -> list[str]:
+    _, ruta, query = _partes(destino)
+    nombres = {k.lower() for k, _ in query}
+    tipos = []
+    if PRODUCTO_EN_COLECCION.match(ruta):
+        tipos.append("shopify_enlace_a_producto_en_coleccion")
+    if "variant" in nombres and (PRODUCTO.match(ruta) or PRODUCTO_EN_COLECCION.match(ruta)):
+        tipos.append("shopify_enlace_a_variante")
+    if ("page", "1") in query and COLECCION.match(ruta):
+        tipos.append("shopify_enlace_a_pagina_1")
+    if nombres & set(PARAMETROS_DE_APPS):
+        tipos.append("shopify_parametros_de_apps")
+    if any(t in destino.lower() for t in TECNICAS):
+        tipos.append("shopify_url_tecnica")
+    if CON_BARRA.match(ruta):
+        tipos.append("shopify_enlace_con_barra_final")
+    return tipos
+
+
+def _severidad(tipo: str) -> str:
+    if tipo == "shopify_canonical_producto_a_coleccion":
+        return "error"
+    if tipo in ("shopify_enlace_a_producto_en_coleccion", "shopify_parametros_de_apps",
+                "shopify_coleccion_vacia"):
+        return "warning"
+    return "info"
+
+
 def avisar(az) -> dict[str, Any] | None:
-    from analysis.avisos_de_sitemaps import _Anclas
     from shared.models import HtmlMeta, Job, Link, Url
 
     det = detectar(az)
     if not det["detectado"]:
         return None
     job = az.session.get(Job, az.job_id)
+    umbral = int(getattr(az, "enlaces_plantilla_min_paginas", 10) or 10)
 
     # El censo: lo que hace falta de cada URL interna.
     censo: dict[int, Any] = {}
@@ -152,131 +218,104 @@ def avisar(az) -> dict[str, Any] | None:
         por_url[fila.url] = fila.id
 
     # Los enlaces internos que importan, en streaming y filtrados en SQL por el
-    # job (decision 37): cuentas y una muestra, nunca la lista entera.
-    grupos: dict[tuple[str, str], dict[str, Any]] = defaultdict(
-        lambda: {"enlaces": 0, "origenes": set(), "destinos": set(), "ejemplos": []})
+    # job (decision 37). Se acumulan por destino (para saber si es de
+    # plantilla) y por pagina de origen (donde va el aviso).
+    por_destino: dict[tuple[str, str], dict[str, Any]] = defaultdict(
+        lambda: {"origenes": set(), "enlaces": 0})
+    por_origen: dict[tuple[str, int], dict[str, int]] = defaultdict(lambda: defaultdict(int))
     con_productos: set[int] = set()
     L = Link
     patrones = ["%/products/%", "%/collections/%", "%/pages/%", "%page=1%", "%.js.js%",
                 "%customer!_authentication%", "%/web-pixels%", "%pr!_%", "%!_pos=%", "%!_sid=%",
-                "%!_ss=%"]
+                "%!_ss=%", "%!_atid=%"]
     consulta = (select(L.from_url_id, L.to_url, L.repeticiones)
                 .where(L.job_id == az.job_id, L.is_internal.is_(True),
                        or_(L.follow.is_(None), L.follow.is_(True)),
                        or_(*[L.to_url.like(p, escape="!") for p in patrones],
                            func.lower(L.to_url).like("%cnweblinkclicked%"))))
-
-    def anotar(tipo, host, origen, destino, veces):
-        g = grupos[(tipo, host)]
-        g["enlaces"] += veces
-        g["origenes"].add(origen)
-        if destino not in g["destinos"] and len(g["ejemplos"]) < MUESTRA:
-            g["ejemplos"].append({"url": destino, "desde": origen})
-        g["destinos"].add(destino)
-
     for origen, destino, veces in az.session.execute(
             consulta.execution_options(yield_per=5000)):
-        host, ruta, query = _partes(destino)
-        veces = int(veces or 1)
-        nombres = {k.lower() for k, _ in query}
-        if "/products/" in ruta:
+        if origen not in censo:
+            continue
+        if "/products/" in _partes(destino)[1]:
             con_productos.add(origen)
-        if PRODUCTO_EN_COLECCION.match(ruta):
-            anotar("shopify_enlace_a_producto_en_coleccion", host, origen, destino, veces)
-        if "variant" in nombres and (PRODUCTO.match(ruta) or PRODUCTO_EN_COLECCION.match(ruta)):
-            anotar("shopify_enlace_a_variante", host, origen, destino, veces)
-        if ("page", "1") in query and COLECCION.match(ruta):
-            anotar("shopify_enlace_a_pagina_1", host, origen, destino, veces)
-        if nombres & set(PARAMETROS_DE_APPS):
-            anotar("shopify_parametros_de_apps", host, origen, destino, veces)
-        if any(t in destino.lower() for t in TECNICAS):
-            anotar("shopify_url_tecnica", host, origen, destino, veces)
-        if CON_BARRA.match(ruta):
-            anotar("shopify_enlace_con_barra_final", host, origen, destino, veces)
+        veces = int(veces or 1)
+        for tipo in _tipos_de_enlace(destino):
+            if tipo == "shopify_url_tecnica" and any(t in censo[origen].url.lower() for t in TECNICAS):
+                continue  # una URL tecnica que enlaza a otra: ya sale en el censo
+            d = por_destino[(tipo, destino)]
+            d["origenes"].add(origen)
+            d["enlaces"] += veces
+            por_origen[(tipo, origen)][destino] += veces
 
-    anclas = _Anclas(az)
-    resumen: dict[str, Any] = {"emitidos": defaultdict(int)}
-    ids_origen = {o for g in grupos.values() for e in g["ejemplos"] for o in [e["desde"]]}
-    url_de = {i: censo[i].url for i in ids_origen if i in censo}
+    resumen: dict[str, Any] = {"emitidos": defaultdict(int), "paginas": set()}
 
-    for (tipo, host), g in sorted(grupos.items()):
-        ancla = anclas.de_fichero(f"https://{host}/")
-        if ancla is None:
-            continue
-        severidad = "warning" if tipo in ("shopify_enlace_a_producto_en_coleccion",
-                                          "shopify_parametros_de_apps") else "info"
-        detalle = {"host": host, "enlaces": g["enlaces"], "paginas_origen": len(g["origenes"]),
-                   "destinos": len(g["destinos"]), "paginas_afectadas": len(g["destinos"]),
-                   "ejemplos": [{"url": e["url"], "desde": url_de.get(e["desde"])} for e in g["ejemplos"]]}
-        if tipo == "shopify_enlace_a_producto_en_coleccion":
-            detalle["en_el_censo"] = sum(1 for d in g["destinos"] if d in por_url)
-        az._add_issue(ancla, tipo, severidad, detalle, group_key=_clave(f"{host}|{tipo}"))
+    def emitir(url_id, tipo, detalle, group_key=None):
+        az._add_issue(url_id, tipo, _severidad(tipo), detalle, group_key=group_key)
         resumen["emitidos"][tipo] += 1
+        resumen["paginas"].add(url_id)
 
-    # URLs tecnicas que el rastreo SI pidio (ademas de las enlazadas).
-    tecnicas_censo: dict[str, list[str]] = defaultdict(list)
-    for fila in censo.values():
+    # De plantilla: el mismo destino desde `umbral` paginas o mas. Un aviso, en
+    # el destino si se rastreo o en la pagina de URL menor que lo enlaza.
+    de_plantilla = {k for k, d in por_destino.items() if len(d["origenes"]) >= umbral}
+    for tipo, destino in sorted(de_plantilla):
+        d = por_destino[(tipo, destino)]
+        origenes = sorted(censo[o].url for o in d["origenes"])
+        ancla = por_url.get(destino) or por_url[origenes[0]]
+        emitir(ancla, tipo, {
+            "alcance": "plantilla", "host": _partes(destino)[0], "destino": destino,
+            "enlazar_a": _enlazar_a(tipo, destino), "paginas_que_enlazan": len(origenes),
+            "enlaces": d["enlaces"], "paginas_ejemplo": origenes[:MUESTRA]},
+            group_key=_clave(f"plantilla|{destino}"))
+
+    # Por pagina de origen, con los destinos que no son de plantilla.
+    for (tipo, origen), destinos in sorted(por_origen.items(),
+                                           key=lambda x: (x[0][0], censo[x[0][1]].url)):
+        propios = sorted(d for d in destinos if (tipo, d) not in de_plantilla)
+        if not propios:
+            continue
+        emitir(origen, tipo, {
+            "alcance": "pagina", "host": _partes(censo[origen].url)[0],
+            "enlaces": sum(destinos[d] for d in propios), "destinos": len(propios),
+            "ejemplos": [{"url": d, "enlazar_a": _enlazar_a(tipo, d)} for d in propios[:MUESTRA]]})
+
+    # URLs tecnicas que el rastreo SI pidio: el aviso en cada una.
+    for fila in sorted(censo.values(), key=lambda f: f.url):
         if any(t in fila.url.lower() for t in TECNICAS):
-            tecnicas_censo[_partes(fila.url)[0]].append(fila.url)
-    for host, urls in sorted(tecnicas_censo.items()):
-        if ("shopify_url_tecnica", host) in grupos:
-            continue
-        ancla = anclas.de_fichero(f"https://{host}/")
-        if ancla is None:
-            continue
-        az._add_issue(ancla, "shopify_url_tecnica", "info", {
-            "host": host, "paginas_afectadas": len(urls), "en_el_censo": len(urls),
-            "ejemplos": sorted(urls)[:MUESTRA]}, group_key=_clave(f"{host}|shopify_url_tecnica"))
-        resumen["emitidos"]["shopify_url_tecnica"] += 1
+            emitir(fila.id, "shopify_url_tecnica", {"alcance": "url", "host": _partes(fila.url)[0]},
+                   group_key=_clave("censo"))
 
-    # Colecciones: vacias y «ver todo».
+    # Colecciones: vacias y «ver todo», en cada una.
     colecciones = [(f, COLECCION.match(_partes(f.url)[1])) for f in censo.values()
                    if f.status_code == 200 and f.is_html and not _partes(f.url)[2]]
-    colecciones = [(f, m.group(1)) for f, m in colecciones if m]
+    colecciones = sorted(((f, m.group(1)) for f, m in colecciones if m), key=lambda x: x[0].url)
     resumen["colecciones"] = len(colecciones)
     resumen["colecciones_con_productos"] = sum(1 for f, _ in colecciones if f.id in con_productos)
-    vacias: dict[str, list] = defaultdict(list)
-    ver_todo: dict[str, list] = defaultdict(list)
     for f, handle in colecciones:
-        host = _partes(f.url)[0]
         if f.id not in con_productos and resumen["colecciones_con_productos"]:
-            vacias[host].append(f)
+            emitir(f.id, "shopify_coleccion_vacia", {"alcance": "url", "host": _partes(f.url)[0]})
         if f.indexable and VER_TODO.match(handle.lower()):
-            ver_todo[host].append(f)
-    for tipo, porhost, severidad in (("shopify_coleccion_vacia", vacias, "warning"),
-                                     ("shopify_coleccion_ver_todo", ver_todo, "info")):
-        for host, filas in sorted(porhost.items()):
-            filas = sorted(filas, key=lambda f: f.url)
-            az._add_issue(filas[0].id, tipo, severidad, {
-                "host": host, "paginas_afectadas": len(filas),
-                "indexables": sum(1 for f in filas if f.indexable),
-                "en_sitemap": sum(1 for f in filas if f.in_sitemap),
-                "ejemplos": [f.url for f in filas[:MUESTRA]]}, group_key=_clave(f"{host}|{tipo}"))
-            resumen["emitidos"][tipo] += 1
+            emitir(f.id, "shopify_coleccion_ver_todo", {"alcance": "url", "host": _partes(f.url)[0]})
 
-    # Fichas cuyo canonical apunta a una coleccion (P26).
+    # Fichas cuyo canonical apunta a una coleccion (P26), en cada una.
     productos = [f for f in censo.values() if f.status_code == 200 and f.is_html
                  and PRODUCTO.match(_partes(f.url)[1])]
     resumen["productos"] = len(productos)
-    malas: dict[str, list] = defaultdict(list)
+    malas = []
     ids = [f.id for f in productos]
     for i in range(0, len(ids), 2000):
         for uid, canonical in az.session.execute(
                 select(HtmlMeta.url_id, HtmlMeta.canonical_href)
                 .where(HtmlMeta.url_id.in_(ids[i:i + 2000]), HtmlMeta.canonical_href.isnot(None))):
-            ruta = _partes(canonical)[1]
-            if COLECCION.match(ruta):
-                malas[_partes(censo[uid].url)[0]].append((censo[uid], canonical))
-    for host, filas in sorted(malas.items()):
-        filas.sort(key=lambda x: x[0].url)
-        az._add_issue(filas[0][0].id, "shopify_canonical_producto_a_coleccion", "error", {
-            "host": host, "paginas_afectadas": len(filas),
-            "ejemplos": [{"url": f.url, "destino": c} for f, c in filas[:MUESTRA]]},
-            group_key=_clave(f"{host}|shopify_canonical_producto_a_coleccion"))
-        resumen["emitidos"]["shopify_canonical_producto_a_coleccion"] += 1
+            if COLECCION.match(_partes(canonical)[1]):
+                malas.append((censo[uid], canonical))
+    for f, canonical in sorted(malas, key=lambda x: x[0].url):
+        emitir(f.id, "shopify_canonical_producto_a_coleccion",
+               {"alcance": "url", "host": _partes(f.url)[0], "canonical": canonical})
 
     az._flush_issues()
     resumen["emitidos"] = dict(resumen["emitidos"])
+    resumen["paginas"] = len(resumen["paginas"])
     if job is not None:
         adapters = dict(getattr(job, "adapters", None) or {})
         adapters[ADAPTADOR] = {**det, "analisis": resumen}
