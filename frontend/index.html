@@ -2418,8 +2418,9 @@
               <input type="file" accept=".json,application/json" style="display:none" @change="subirLlaveGscAgencia($event)" data-testid="gsc-fichero">
             </label>
           </div>
-          <p class="form-hint">El JSON de la cuenta de servicio, tal cual se descarga de Google Cloud. Se guarda en el servidor, fuera de la base
-            de datos, y no se vuelve a enseñar: solo su email, que es el que hay que dar de alta como usuario en Search Console.</p>
+          <p class="form-hint">El JSON de la cuenta de servicio, tal cual se descarga de Google Cloud, o el de un login de usuario
+            (<code>"type": "authorized_user"</code>). Se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar:
+            solo su email, que es el que hay que dar de alta como usuario en Search Console (con un login de usuario no hace falta).</p>
         </section>
 
         <!-- Modelos -->

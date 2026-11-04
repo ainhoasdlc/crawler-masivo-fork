@@ -110,7 +110,7 @@ class GscError(RuntimeError):
 
 
 class LlaveNoValida(ValueError):
-    """El JSON subido no es la llave de una cuenta de servicio."""
+    """El JSON subido no es la llave de una cuenta de servicio ni un OAuth de usuario."""
 
 
 def leer_llave(texto: str) -> dict[str, Any]:
@@ -121,8 +121,10 @@ def leer_llave(texto: str) -> dict[str, Any]:
         raise LlaveNoValida("No es un JSON. Descarga la llave de la cuenta de servicio en "
                             "Google Cloud → IAM → Cuentas de servicio → Claves → Añadir clave → JSON.")
     if isinstance(info, dict) and info.get("type") == "authorized_user":
-        # Local (rama local/gsc-oauth-usuario): el login de usuario con refresh
-        # token, como el de los MCP de Search Console. Sin clave privada.
+        # El login de usuario con refresh token (el de `gcloud auth
+        # application-default login` o el de los MCP de Search Console): ve las
+        # propiedades a las que ya tiene acceso esa persona, sin dar de alta una
+        # cuenta de servicio en cada una. No lleva clave privada.
         for campo in ("client_id", "client_secret", "refresh_token"):
             if not info.get(campo):
                 raise LlaveNoValida(f"Al OAuth de usuario le falta «{campo}»: está incompleto.")
@@ -163,14 +165,16 @@ def traducir(status: int | None, detalle: str, cuenta: str | None, propiedad: st
                 "sc-domain:dominio.com para una propiedad de dominio, o https://www.dominio.com/ "
                 "(con la barra final) para una de prefijo de URL.")
     if status == 401:
-        return "Google rechaza la llave: puede estar revocada o la cuenta de servicio deshabilitada. Sube una nueva."
+        return ("Google rechaza la llave: puede estar revocada, la cuenta de servicio deshabilitada "
+                "o el login de usuario caducado. Sube una nueva.")
     if status == 429:
         return "Google ha limitado las peticiones (cuota). Se reintentará más tarde."
     return f"Error de Search Console ({status or 'sin respuesta'}): {detalle[:300]}"
 
 
 class Consultor:
-    """La llamada real a Google, con la llave de la cuenta de servicio. Solo
+    """La llamada real a Google, con la llave de la cuenta de servicio o el
+    OAuth de usuario. Solo
     se construye en el worker (y en la API para listar propiedades)."""
 
     def __init__(self, info: dict[str, Any]):

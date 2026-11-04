@@ -84,10 +84,42 @@ contenedores.
 
 | Integración | Qué poner | Más detalle |
 |---|---|---|
-| Search Console | Se sube la llave de la cuenta de servicio desde la ficha del cliente | [`despliegue-y-entorno.md`](../referencia/despliegue-y-entorno.md) |
+| Search Console | Se sube la llave de la cuenta de servicio, o tu login de Google ([abajo](#search-console-con-tu-login-de-google)), desde la ficha del cliente | [`despliegue-y-entorno.md`](../referencia/despliegue-y-entorno.md) |
 | Slack | Token del bot (`xoxb-…`) en la ficha del cliente, o `SLACK_<NOMBRE>` en `.env` | `.env.example` |
 | Capa de IA (Jev) | `DECISIONS_ENABLED=1`, `OPENROUTER_API_KEY` y `ENRICHMENT_TOKEN`. **Cuesta dinero**: déjala apagada salvo que vayas a probarla | `.env.example` y [`decisiones/`](../decisiones/README.md) |
 | MCP (Claude Code contra tu instalación) | En local, `CRAWLER_API_URL=http://127.0.0.1:8000` y tu token en `CRAWLER_API_TOKEN`. En un servidor con dominio, el MCP remoto en `https://<dominio>/mcp` | [`mcp_servidor/README.md`](../../mcp_servidor/README.md) |
+
+### Search Console con tu login de Google
+
+Si ya tienes acceso a las propiedades con tu usuario (el mismo login con el
+que conectas los MCP de Search Console), puedes subir ese login en vez de una
+cuenta de servicio: no hace falta dar de alta nada en cada propiedad. Se sube
+igual, desde la ficha del cliente o desde Ajustes, como un JSON con esta forma:
+
+```json
+{
+  "type": "authorized_user",
+  "client_id": "….apps.googleusercontent.com",
+  "client_secret": "…",
+  "refresh_token": "1//…",
+  "account": "tu@agencia.com"
+}
+```
+
+- **Con `gcloud`:** `gcloud auth application-default login
+  --client-id-file=client_secret.json
+  --scopes=https://www.googleapis.com/auth/webmasters.readonly,https://www.googleapis.com/auth/cloud-platform`
+  abre el navegador y deja el JSON en
+  `~/.config/gcloud/application_default_credentials.json` (en Windows,
+  `%APPDATA%\gcloud\`). El `client_secret.json` es el de un cliente OAuth de
+  escritorio de tu proyecto de Google Cloud.
+- **Desde un MCP ya conectado:** `client_id` y `client_secret` salen de su
+  `client_secret….json` (clave `installed`) y `refresh_token` del token que
+  guardó tras el login.
+
+`account` es opcional: es lo que la interfaz enseña en lugar del email de la
+cuenta de servicio. El refresh token da acceso a todo lo que ve ese usuario en
+Search Console: trátalo como una contraseña.
 
 ## Problemas frecuentes
 

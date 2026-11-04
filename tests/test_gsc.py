@@ -19,6 +19,8 @@ from shared import secretos
 LLAVE = {"type": "service_account", "project_id": "lin3s-seo", "client_email": "crawler@lin3s-seo.iam.gserviceaccount.com",
          "private_key": "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
          "token_uri": "https://oauth2.googleapis.com/token"}
+OAUTH = {"type": "authorized_user", "client_id": "123.apps.googleusercontent.com", "client_secret": "SECRETO",
+         "refresh_token": "1//SECRETO", "account": "seo@agencia.com"}
 
 
 @compiles(BigInteger, "sqlite")
@@ -36,7 +38,9 @@ def _secretos(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("texto, trozo", [
     ("no es json", "No es un JSON"),
-    (json.dumps({"type": "authorized_user"}), "cuenta de servicio"),
+    (json.dumps({"type": "external_account"}), "cuenta de servicio"),
+    (json.dumps({"type": "authorized_user"}), "OAuth de usuario"),
+    (json.dumps({**OAUTH, "refresh_token": ""}), "refresh_token"),
     (json.dumps({**LLAVE, "private_key": ""}), "private_key"),
     (json.dumps({**LLAVE, "private_key": "abc"}), "formato"),
 ])
@@ -48,6 +52,20 @@ def test_una_llave_que_no_vale_dice_por_que(texto, trozo):
 def test_de_la_llave_solo_se_ensena_lo_publico():
     assert G.publico(G.leer_llave(json.dumps(LLAVE))) == {
         "client_email": LLAVE["client_email"], "project_id": "lin3s-seo"}
+
+
+def test_un_oauth_de_usuario_vale_y_solo_ensena_la_cuenta():
+    assert G.leer_llave(json.dumps(OAUTH)) == OAUTH
+    assert G.publico(OAUTH) == {"client_email": "seo@agencia.com", "project_id": None}
+    assert G.publico({**OAUTH, "account": ""})["client_email"] == "OAuth de usuario"
+
+
+def test_el_oauth_de_usuario_se_renueva_con_su_refresh_token():
+    from google.oauth2.credentials import Credentials
+
+    creds = G.Consultor(OAUTH)._s.credentials
+    assert isinstance(creds, Credentials)
+    assert creds.refresh_token == OAUTH["refresh_token"] and creds.client_id == OAUTH["client_id"]
 
 
 def test_la_llave_subida_se_lee_como_credencial_y_el_entorno_manda(monkeypatch, tmp_path):
